@@ -1,4 +1,5 @@
 const chokidar = require("chokidar");
+const Event = require("../models/event.model");
 
 function createFileEvent(action, filePath) {
   return {
@@ -9,40 +10,41 @@ function createFileEvent(action, filePath) {
   };
 }
 
+async function saveEvent(event) {
+  try {
+    await Event.create(event);
+    console.log("EVENT SAVED:", event);
+  } catch (error) {
+    console.error("Failed to save event:", error.message);
+  }
+}
+
 function watchProject(projectPath, onEvent) {
   const watcher = chokidar.watch(projectPath, {
     persistent: true,
     ignoreInitial: true,
   });
 
-  watcher.on("add", (filePath) => {
-    const event = createFileEvent("created", filePath);
+  const handleEvent = (event) => {
+    console.log("AGENTGUARD EVENT:", event);
 
-    console.log("FILE EVENT:", event);
+    saveEvent(event);
 
     if (onEvent) {
       onEvent(event);
     }
+  };
+
+  watcher.on("add", (filePath) => {
+    handleEvent(createFileEvent("created", filePath));
   });
 
   watcher.on("change", (filePath) => {
-    const event = createFileEvent("changed", filePath);
-
-    console.log("FILE EVENT:", event);
-
-    if (onEvent) {
-      onEvent(event);
-    }
+    handleEvent(createFileEvent("changed", filePath));
   });
 
   watcher.on("unlink", (filePath) => {
-    const event = createFileEvent("deleted", filePath);
-
-    console.log("FILE EVENT:", event);
-
-    if (onEvent) {
-      onEvent(event);
-    }
+    handleEvent(createFileEvent("deleted", filePath));
   });
 
   watcher.on("error", (error) => {

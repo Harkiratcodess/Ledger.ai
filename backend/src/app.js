@@ -1,6 +1,7 @@
 const express = require("express");
 const cors = require("cors");
 const { createSandbox } = require("./services/docker.service");
+const Event = require("./models/event.model")
 
 const app = express();
 
@@ -13,6 +14,25 @@ app.get("/api", (_req, res) => {
     service: "backend",
     status: "running",
   });
+});
+app.get("/api/events", async (req, res) => {
+  try {
+    const events = await Event.find()
+      .sort({ timestamp: -1 })
+      .limit(100);
+
+    res.json({
+      success: true,
+      events,
+    });
+  } catch (error) {
+    console.error("Failed to fetch events:", error.message);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 app.get("/api/health", (_req, res) => {
