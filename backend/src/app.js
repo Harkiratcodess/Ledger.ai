@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const { createSandbox } = require("./services/docker.service");
 
 const app = express();
 
@@ -19,6 +20,38 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "agentguard-backend",
   });
+});
+
+app.post("/api/sandbox/test", async (req, res) => {
+  try {
+    const projectPath = `${process.cwd()}/sandbox-test`;
+
+    const container = await createSandbox(projectPath);
+
+    await container.start();
+
+    const result = await container.wait();
+
+    const logs = await container.logs({
+      stdout: true,
+      stderr: true,
+    });
+
+    await container.remove();
+
+    res.json({
+      success: true,
+      exitCode: result.StatusCode,
+      output: logs.toString(),
+    });
+  } catch (error) {
+    console.error("Sandbox test failed:", error);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
 });
 
 app.use("/api", (_req, res) => {
