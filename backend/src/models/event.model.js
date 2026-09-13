@@ -9,12 +9,26 @@ const eventSchema = new mongoose.Schema(
 
     action: {
       type: String,
-      required: true,
     },
 
     path: {
       type: String,
-      required: true,
+    },
+
+    hostname: {
+      type: String,
+    },
+
+    method: {
+      type: String,
+    },
+
+    url: {
+      type: String,
+    },
+
+    statusCode: {
+      type: Number,
     },
 
     timestamp: {

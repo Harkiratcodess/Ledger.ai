@@ -74,6 +74,40 @@ app.post("/api/sandbox/test", async (req, res) => {
   }
 });
 
+app.post("/api/network-events", async (req, res) => {
+  try {
+    const { hostname, method, url, statusCode, timestamp } = req.body || {};
+
+    if (!hostname || !method || !url || !timestamp) {
+      return res.status(400).json({
+        success: false,
+        error: "hostname, method, url, and timestamp are required",
+      });
+    }
+
+    const event = await Event.create({
+      type: "network",
+      hostname,
+      method: String(method).toUpperCase(),
+      url,
+      statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
+      timestamp: new Date(timestamp),
+    });
+
+    res.status(201).json({
+      success: true,
+      event,
+    });
+  } catch (error) {
+    console.error("Failed to store network event:", error.message);
+
+    res.status(500).json({
+      success: false,
+      error: error.message,
+    });
+  }
+});
+
 app.use("/api", (_req, res) => {
   res.status(404).json({ error: "Route not found" });
 });
