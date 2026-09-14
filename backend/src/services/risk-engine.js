@@ -94,6 +94,14 @@ function evaluateEvent(event = {}) {
     const sensitivePathMatch = SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(lowerPath));
     const outsideWorkspace = rawPath && !looksInsideWorkspace(rawPath);
 
+    if (sensitivePathMatch && outsideWorkspace) {
+      return {
+        riskLevel: "CRITICAL",
+        riskScore: 99,
+        reason: `Critical sensitive credential path accessed outside the workspace: ${rawPath}`,
+      };
+    }
+
     if (sensitivePathMatch) {
       return {
         riskLevel: "HIGH",

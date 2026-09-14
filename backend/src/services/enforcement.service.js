@@ -1,4 +1,5 @@
 const ACTIVE_SANDBOX_CONTAINERS = new Map();
+let ACTIVE_SANDBOX_CONTAINER_ID = null;
 
 function registerSandboxContainer(container, metadata = {}) {
   if (!container || !container.id) {
@@ -16,14 +17,33 @@ function registerSandboxContainer(container, metadata = {}) {
     ...normalizedMetadata,
   });
 
+  ACTIVE_SANDBOX_CONTAINER_ID = container.id;
   container.__agentguardTracked = true;
 
   return container;
 }
 
+function setActiveSandboxContainer(container) {
+  if (!container || !container.id || !ACTIVE_SANDBOX_CONTAINERS.has(container.id)) {
+    return null;
+  }
+
+  ACTIVE_SANDBOX_CONTAINER_ID = container.id;
+  return container;
+}
+
 function getActiveSandboxContainer() {
+  if (ACTIVE_SANDBOX_CONTAINER_ID && ACTIVE_SANDBOX_CONTAINERS.has(ACTIVE_SANDBOX_CONTAINER_ID)) {
+    return ACTIVE_SANDBOX_CONTAINERS.get(ACTIVE_SANDBOX_CONTAINER_ID).container;
+  }
+
   const firstEntry = ACTIVE_SANDBOX_CONTAINERS.values().next().value;
-  return firstEntry ? firstEntry.container : null;
+  if (firstEntry) {
+    ACTIVE_SANDBOX_CONTAINER_ID = firstEntry.container.id;
+    return firstEntry.container;
+  }
+
+  return null;
 }
 
 function isTrackedSandboxContainer(container) {
@@ -57,6 +77,44 @@ async function pauseSandbox(container) {
   };
 }
 
+async function killSandbox(container) {
+  if (!container || !container.id) {
+    throw new Error("Kill denied: no sandbox container provided.");
+  }
+
+  if (!isTrackedSandboxContainer(container)) {
+    throw new Error("Kill denied: container is not tracked by AgentGuard.");
+  }
+
+  const activeSandbox = getActiveSandboxContainer();
+  if (activeSandbox && activeSandbox.id !== container.id) {
+    throw new Error("Kill denied: container does not belong to the active AgentGuard sandbox.");
+  }
+
+  const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;
+  const beforeKill = await trackedContainer.inspect();
+
+  if (beforeKill?.State?.Running === false) {
+    return {
+      action: "kill",
+      status: "already_stopped",
+      timestamp: new Date(),
+      containerId: trackedContainer.id,
+    };
+  }
+
+  await trackedContainer.kill();
+
+  const afterKill = await trackedContainer.inspect();
+
+  return {
+    action: "kill",
+    status: afterKill?.State?.Running === false ? "terminated" : "kill_failed",
+    timestamp: new Date(),
+    containerId: trackedContainer.id,
+  };
+}
+
 async function applyRiskEnforcement(event = {}, riskAssessment = {}, context = {}) {
   const safeEvent = {
     ...event,
@@ -74,6 +132,28 @@ async function applyRiskEnforcement(event = {}, riskAssessment = {}, context = {
       ...safeEvent,
       enforcementAction: "record",
       enforcementStatus: "logged",
+      enforcementTimestamp: new Date(),
+    };
+  }
+
+  if (riskAssessment.riskLevel === "CRITICAL") {
+    const sandboxContainer = context.container || getActiveSandboxContainer();
+
+    if (sandboxContainer && isTrackedSandboxContainer(sandboxContainer)) {
+      const killResult = await killSandbox(sandboxContainer);
+
+      return {
+        ...safeEvent,
+        enforcementAction: killResult.action,
+        enforcementStatus: killResult.status,
+        enforcementTimestamp: killResult.timestamp,
+      };
+    }
+
+    return {
+      ...safeEvent,
+      enforcementAction: "kill",
+      enforcementStatus: "not_applicable",
       enforcementTimestamp: new Date(),
     };
   }
@@ -108,6 +188,8 @@ module.exports = {
   applyRiskEnforcement,
   getActiveSandboxContainer,
   isTrackedSandboxContainer,
+  killSandbox,
   pauseSandbox,
   registerSandboxContainer,
+  setActiveSandboxContainer,
 };
