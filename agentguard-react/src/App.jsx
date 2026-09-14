@@ -3,6 +3,7 @@ import { HashRouter, Navigate, Route, Routes } from "react-router-dom";
 
 import Overview from "./pages/Overview";
 import Filesystem from "./pages/Filesystem";
+import Network from "./pages/Network";
 import SandboxSetup from "./pages/SandboxSetup";
 import Sessions from "./pages/Sessions";
 import SessionDetails from "./pages/SessionDetails";
@@ -17,6 +18,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<Overview />} />
         <Route path="/filesystem" element={<Filesystem />} />
+        <Route path="/network" element={<Network />} />
         <Route path="/sandbox-setup" element={<SandboxSetup />} />
         <Route path="/sessions" element={<Sessions />} />
         <Route path="/session/:id" element={<SessionDetails />} />

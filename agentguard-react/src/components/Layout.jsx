@@ -4,6 +4,7 @@ import { NavLink } from "react-router-dom";
 const PRIMARY_NAV = [
   { label: "OVERVIEW", to: "/" },
   { label: "FILESYSTEM", to: "/filesystem" },
+  { label: "NETWORK", to: "/network" },
   { label: "SANDBOX SETUP", to: "/sandbox-setup" },
   { label: "SESSIONS", to: "/sessions" },
 ];

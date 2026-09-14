@@ -1,6 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const { createSandbox } = require("./services/docker.service");
+const { evaluateEvent } = require("./services/risk-engine");
+const { applyRiskEnforcement, getActiveSandboxContainer } = require("./services/enforcement.service");
 const Event = require("./models/event.model")
 
 const app = express();
@@ -46,7 +48,9 @@ app.post("/api/sandbox/test", async (req, res) => {
   try {
     const projectPath = `${process.cwd()}/sandbox-test`;
 
-    const container = await createSandbox(projectPath);
+    const container = await createSandbox(projectPath, {
+      command: ["cat", "/workspace/test.txt"],
+    });
 
     await container.start();
 
@@ -85,6 +89,28 @@ app.post("/api/network-events", async (req, res) => {
       });
     }
 
+    const riskAssessment = evaluateEvent({
+      type: "network",
+      hostname,
+      method: String(method).toUpperCase(),
+      url,
+      statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
+      timestamp: new Date(timestamp),
+    });
+
+    const enforcementResult = await applyRiskEnforcement(
+      {
+        type: "network",
+        hostname,
+        method: String(method).toUpperCase(),
+        url,
+        statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
+        timestamp: new Date(timestamp),
+      },
+      riskAssessment,
+      { container: getActiveSandboxContainer() }
+    );
+
     const event = await Event.create({
       type: "network",
       hostname,
@@ -92,6 +118,12 @@ app.post("/api/network-events", async (req, res) => {
       url,
       statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
       timestamp: new Date(timestamp),
+      riskLevel: riskAssessment.riskLevel,
+      riskScore: riskAssessment.riskScore,
+      riskReason: riskAssessment.reason,
+      enforcementAction: enforcementResult.enforcementAction,
+      enforcementStatus: enforcementResult.enforcementStatus,
+      enforcementTimestamp: enforcementResult.enforcementTimestamp,
     });
 
     res.status(201).json({
