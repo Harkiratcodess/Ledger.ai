@@ -46,6 +46,31 @@ function getActiveSandboxContainer() {
   return null;
 }
 
+function getActiveSandboxMetadata() {
+  const container = getActiveSandboxContainer();
+  return container ? ACTIVE_SANDBOX_CONTAINERS.get(container.id) || null : null;
+}
+
+function getTrackedSandboxContainer(containerId) {
+  return ACTIVE_SANDBOX_CONTAINERS.get(containerId)?.container || null;
+}
+
+function getTrackedSandboxMetadata(containerId) {
+  return ACTIVE_SANDBOX_CONTAINERS.get(containerId) || null;
+}
+
+function getActiveSandboxContext() {
+  const container = getActiveSandboxContainer();
+  if (!container) {
+    return null;
+  }
+
+  return {
+    container,
+    metadata: ACTIVE_SANDBOX_CONTAINERS.get(container.id) || null,
+  };
+}
+
 function isTrackedSandboxContainer(container) {
   return Boolean(container && container.id && ACTIVE_SANDBOX_CONTAINERS.has(container.id));
 }
@@ -273,6 +298,10 @@ module.exports = {
   applyRiskEnforcement,
   clearSandboxContainer,
   getActiveSandboxContainer,
+  getActiveSandboxContext,
+  getActiveSandboxMetadata,
+  getTrackedSandboxContainer,
+  getTrackedSandboxMetadata,
   isTrackedSandboxContainer,
   killSandbox,
   pauseSandbox,

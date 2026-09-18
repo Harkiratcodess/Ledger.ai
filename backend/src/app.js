@@ -1,17 +1,25 @@
 const express = require("express");
 const cors = require("cors");
+const crypto = require("crypto");
+const { PassThrough } = require("stream");
 const { createSandbox } = require("./services/docker.service");
 const { evaluateEvent } = require("./services/risk-engine");
 const {
   applyRiskEnforcement,
   clearSandboxContainer,
   getActiveSandboxContainer,
+  getActiveSandboxContext,
+  getActiveSandboxMetadata,
+  getTrackedSandboxContainer,
+  getTrackedSandboxMetadata,
   isTrackedSandboxContainer,
   killSandbox,
   pauseSandbox,
   resumeSandbox,
+  setActiveSandboxContainer,
 } = require("./services/enforcement.service");
 const Event = require("./models/event.model")
+const Session = require("./models/session.model");
 
 const app = express();
 
@@ -52,6 +60,214 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
+function createSessionId() {
+  const stamp = new Date().toISOString().replace(/[-:TZ.]/g, "").slice(0, 14);
+  return `AG-${stamp}-${crypto.randomBytes(3).toString("hex")}`;
+}
+
+app.post("/api/sessions", async (_req, res) => {
+  let session;
+  let container;
+
+  try {
+    session = await Session.create({
+      sessionId: createSessionId(),
+      status: "CREATED",
+    });
+    const projectPath = `${process.cwd()}/sandbox-test`;
+    container = await createSandbox(projectPath, {
+      command: ["sleep", "600"],
+      sessionId: session.sessionId,
+    });
+
+    await container.start();
+
+    const startedAt = new Date();
+    const updatedSession = await Session.findByIdAndUpdate(
+      session._id,
+      {
+        status: "RUNNING",
+        containerId: container.id,
+        startedAt,
+      },
+      { new: true }
+    );
+
+    return res.status(201).json({ success: true, session: updatedSession });
+  } catch (error) {
+    const finishedAt = new Date();
+    if (session) {
+      await Session.findByIdAndUpdate(session._id, {
+        status: "FAILED",
+        ...(container?.id ? { containerId: container.id } : {}),
+        finishedAt,
+      });
+    }
+
+    if (container) {
+      try {
+        await container.remove({ force: true });
+      } catch (cleanupError) {
+        if (cleanupError.statusCode !== 404) {
+          console.error("Failed to clean up failed session sandbox:", cleanupError.message);
+        }
+      }
+      clearSandboxContainer(container);
+    }
+
+    console.error("Failed to create AgentGuard session:", error.message);
+    return res.status(500).json({ success: false, error: "AgentGuard session could not be started." });
+  }
+});
+
+app.get("/api/sessions", async (_req, res) => {
+  try {
+    const sessions = await Session.find().sort({ createdAt: -1 }).limit(100);
+    return res.json({ success: true, sessions });
+  } catch (error) {
+    console.error("Failed to fetch sessions:", error.message);
+    return res.status(500).json({ success: false, error: "Sessions could not be loaded." });
+  }
+});
+
+app.get("/api/sessions/:sessionId", async (req, res) => {
+  try {
+    const session = await Session.findOne({ sessionId: req.params.sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Session not found." });
+    }
+
+    return res.json({ success: true, session });
+  } catch (error) {
+    console.error("Failed to fetch session:", error.message);
+    return res.status(500).json({ success: false, error: "Session could not be loaded." });
+  }
+});
+
+app.get("/api/sessions/:sessionId/events", async (req, res) => {
+  try {
+    const session = await Session.exists({ sessionId: req.params.sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Session not found." });
+    }
+
+    const events = await Event.find({ sessionId: req.params.sessionId })
+      .sort({ timestamp: -1 })
+      .limit(100);
+
+    return res.json({ success: true, events });
+  } catch (error) {
+    console.error("Failed to fetch session events:", error.message);
+    return res.status(500).json({ success: false, error: "Session events could not be loaded." });
+  }
+});
+
+async function executeSandboxCommand(container, command) {
+  const exec = await container.exec({
+    Cmd: command,
+    AttachStdout: true,
+    AttachStderr: true,
+  });
+  const stdoutStream = new PassThrough();
+  const stderrStream = new PassThrough();
+  const stdout = [];
+  const stderr = [];
+
+  stdoutStream.on("data", (chunk) => stdout.push(chunk));
+  stderrStream.on("data", (chunk) => stderr.push(chunk));
+
+  const stream = await exec.start({ hijack: true, stdin: false });
+  const streamEnded = new Promise((resolve, reject) => {
+    stream.once("end", resolve);
+    stream.once("error", reject);
+  });
+
+  container.modem.demuxStream(stream, stdoutStream, stderrStream);
+  await streamEnded;
+
+  const result = await exec.inspect();
+  return {
+    exitCode: result.ExitCode,
+    stdout: Buffer.concat(stdout).toString("utf8"),
+    stderr: Buffer.concat(stderr).toString("utf8"),
+  };
+}
+
+app.post("/api/sessions/:sessionId/execute", async (req, res) => {
+  const { command } = req.body || {};
+
+  if (!Array.isArray(command) || command.length === 0 || command.some((argument) => typeof argument !== "string")) {
+    return res.status(400).json({
+      success: false,
+      error: "command must be a non-empty array of arguments.",
+    });
+  }
+
+  try {
+    const session = await Session.findOne({ sessionId: req.params.sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Session not found." });
+    }
+
+    if (["KILLED", "COMPLETED", "FAILED"].includes(session.status)) {
+      return res.status(409).json({ success: false, error: "Session cannot execute commands in its current state." });
+    }
+
+    const container = getTrackedSandboxContainer(session.containerId);
+    const metadata = getTrackedSandboxMetadata(session.containerId);
+    if (!container || metadata?.sessionId !== session.sessionId) {
+      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by AgentGuard." });
+    }
+
+    let inspection;
+    try {
+      inspection = await container.inspect();
+    } catch (error) {
+      if (error.statusCode === 404) {
+        clearSandboxContainer(container);
+        return res.status(409).json({ success: false, error: "Session sandbox no longer exists." });
+      }
+      throw error;
+    }
+
+    if (inspection.State?.Paused || session.status === "PAUSED") {
+      return res.status(409).json({ success: false, error: "Session sandbox is paused." });
+    }
+
+    if (!inspection.State?.Running) {
+      return res.status(409).json({ success: false, error: "Session sandbox is not running." });
+    }
+
+    setActiveSandboxContainer(container);
+    const startedAt = new Date();
+    await Session.findByIdAndUpdate(session._id, { status: "RUNNING" });
+    const result = await executeSandboxCommand(container, command);
+    const finishedAt = new Date();
+    const execution = {
+      command,
+      ...result,
+      startedAt,
+      finishedAt,
+    };
+    const status = result.exitCode === 0 ? "COMPLETED" : "FAILED";
+    const updatedSession = await Session.findByIdAndUpdate(
+      session._id,
+      {
+        status,
+        exitCode: result.exitCode,
+        finishedAt,
+        $push: { executions: execution },
+      },
+      { new: true }
+    );
+
+    return res.json({ success: true, session: updatedSession, execution });
+  } catch (error) {
+    console.error("Failed to execute AgentGuard session command:", error.message);
+    return res.status(500).json({ success: false, error: "AgentGuard command execution failed." });
+  }
+});
+
 async function inspectActiveSandbox() {
   const container = getActiveSandboxContainer();
 
@@ -66,6 +282,7 @@ async function inspectActiveSandbox() {
       state: {
         active: true,
         containerId: container.id,
+        sessionId: getActiveSandboxMetadata()?.sessionId,
         status: inspection.State?.Status || "unknown",
         running: Boolean(inspection.State?.Running),
         paused: Boolean(inspection.State?.Paused),
@@ -99,6 +316,10 @@ app.post("/api/sandbox/pause", async (_req, res) => {
     }
 
     const result = await pauseSandbox(activeSandbox.container);
+    await Session.findOneAndUpdate(
+      { containerId: activeSandbox.container.id, status: "RUNNING" },
+      { status: "PAUSED" }
+    );
     const state = await inspectActiveSandbox();
     return res.json({ success: true, ...result, ...(state?.state || { active: false }) });
   } catch (error) {
@@ -118,6 +339,10 @@ app.post("/api/sandbox/resume", async (_req, res) => {
     }
 
     const result = await resumeSandbox(activeSandbox.container);
+    await Session.findOneAndUpdate(
+      { containerId: activeSandbox.container.id, status: "PAUSED" },
+      { status: "RUNNING" }
+    );
     const state = await inspectActiveSandbox();
     return res.json({ success: true, ...result, ...(state?.state || { active: false }) });
   } catch (error) {
@@ -137,6 +362,10 @@ app.post("/api/sandbox/kill", async (_req, res) => {
     }
 
     const result = await killSandbox(activeSandbox.container);
+    await Session.findOneAndUpdate(
+      { containerId: activeSandbox.container.id, status: { $in: ["RUNNING", "PAUSED"] } },
+      { status: "KILLED", finishedAt: new Date(), exitCode: null }
+    );
 
     try {
       await activeSandbox.container.remove({ force: true });
@@ -144,6 +373,8 @@ app.post("/api/sandbox/kill", async (_req, res) => {
       if (error.statusCode !== 404) {
         throw error;
       }
+    } finally {
+      clearSandboxContainer(activeSandbox.container);
     }
 
     return res.json({ success: true, ...result, active: false, status: "removed", running: false, paused: false });
@@ -201,35 +432,26 @@ app.post("/api/network-events", async (req, res) => {
       });
     }
 
-    const riskAssessment = evaluateEvent({
+    const sandboxContext = getActiveSandboxContext();
+    const networkEvent = {
       type: "network",
       hostname,
       method: String(method).toUpperCase(),
       url,
       statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
       timestamp: new Date(timestamp),
-    });
+    };
+    const riskAssessment = evaluateEvent(networkEvent);
 
     const enforcementResult = await applyRiskEnforcement(
-      {
-        type: "network",
-        hostname,
-        method: String(method).toUpperCase(),
-        url,
-        statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
-        timestamp: new Date(timestamp),
-      },
+      networkEvent,
       riskAssessment,
-      { container: getActiveSandboxContainer() }
+      { container: sandboxContext?.container }
     );
 
     const event = await Event.create({
-      type: "network",
-      hostname,
-      method: String(method).toUpperCase(),
-      url,
-      statusCode: statusCode !== undefined && statusCode !== null ? Number(statusCode) : undefined,
-      timestamp: new Date(timestamp),
+      ...networkEvent,
+      ...(sandboxContext?.metadata?.sessionId ? { sessionId: sandboxContext.metadata.sessionId } : {}),
       riskLevel: riskAssessment.riskLevel,
       riskScore: riskAssessment.riskScore,
       riskReason: riskAssessment.reason,

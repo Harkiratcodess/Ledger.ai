@@ -1,7 +1,11 @@
 const chokidar = require("chokidar");
 const Event = require("../models/event.model");
+const Session = require("../models/session.model");
 const { evaluateEvent } = require("./risk-engine");
-const { applyRiskEnforcement, getActiveSandboxContainer } = require("./enforcement.service");
+const {
+  applyRiskEnforcement,
+  getActiveSandboxContext,
+} = require("./enforcement.service");
 
 function createFileEvent(action, filePath) {
   return {
@@ -14,12 +18,14 @@ function createFileEvent(action, filePath) {
 
 async function saveEvent(event) {
   try {
+    const sandboxContext = getActiveSandboxContext();
     const riskAssessment = evaluateEvent(event);
     const enforcementResult = await applyRiskEnforcement(event, riskAssessment, {
-      container: getActiveSandboxContainer(),
+      container: sandboxContext?.container,
     });
     const savedEvent = await Event.create({
       ...event,
+      ...(sandboxContext?.metadata?.sessionId ? { sessionId: sandboxContext.metadata.sessionId } : {}),
       riskLevel: riskAssessment.riskLevel,
       riskScore: riskAssessment.riskScore,
       riskReason: riskAssessment.reason,
@@ -27,6 +33,18 @@ async function saveEvent(event) {
       enforcementStatus: enforcementResult.enforcementStatus,
       enforcementTimestamp: enforcementResult.enforcementTimestamp,
     });
+    if (sandboxContext?.metadata?.sessionId && enforcementResult.enforcementStatus === "paused") {
+      await Session.findOneAndUpdate(
+        { sessionId: sandboxContext.metadata.sessionId, status: { $in: ["RUNNING", "COMPLETED"] } },
+        { status: "PAUSED" }
+      );
+    }
+    if (sandboxContext?.metadata?.sessionId && ["terminated", "already_stopped"].includes(enforcementResult.enforcementStatus)) {
+      await Session.findOneAndUpdate(
+        { sessionId: sandboxContext.metadata.sessionId, status: { $in: ["RUNNING", "PAUSED"] } },
+        { status: "KILLED", finishedAt: new Date(), exitCode: null }
+      );
+    }
     console.log("EVENT SAVED:", savedEvent);
   } catch (error) {
     console.error("Failed to save event:", error.message);

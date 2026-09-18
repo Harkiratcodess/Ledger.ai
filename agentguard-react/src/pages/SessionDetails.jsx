@@ -1,22 +1,80 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import Layout from "../components/Layout";
 import ErrorState from "../components/ErrorState";
 import { getSessionById } from "../mock/sessions";
 import { MOCK_EVENTS } from "../mock/events";
 
+function normalizeLiveEvent(event) {
+  return {
+    id: event?._id || event?.id,
+    timestamp: event?.timestamp ? new Date(event.timestamp).toLocaleTimeString("en-GB", { hour12: false }) : "—",
+    operation: event?.action?.toUpperCase() || event?.type?.toUpperCase() || "EVENT",
+    path: event?.path || event?.url || event?.hostname || "—",
+    process: event?.type || "event",
+    pid: "—",
+    sensitive: event?.riskLevel === "HIGH" || event?.riskLevel === "CRITICAL",
+    integrity: `${event?.riskLevel || "LOW"} / SCORE ${event?.riskScore ?? "—"}`,
+  };
+}
+
 export default function SessionDetails() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const session = getSessionById(id);
+  const [apiSession, setApiSession] = useState(null);
   const [opFilter, setOpFilter] = useState("ALL");
   const [toast, setToast] = useState(null);
+  const [liveEvents, setLiveEvents] = useState(null);
+  const mockSession = getSessionById(id);
+  const session = apiSession || mockSession;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`http://localhost:5000/api/sessions/${encodeURIComponent(id)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled && payload?.session) {
+          const runtimeSession = payload.session;
+          setApiSession({
+            id: runtimeSession.sessionId,
+            status: runtimeSession.status,
+            container: runtimeSession.containerId || "—",
+            project: "sandbox-test",
+            projectPath: "/workspace",
+            events: "LIVE",
+            startedFull: runtimeSession.startedAt || "—",
+            duration: "—",
+          });
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const events = useMemo(() => {
-    const list = MOCK_EVENTS.filter((e) => e.sessionId === (session?.id || "AG-2026-001"));
+    const list = liveEvents || MOCK_EVENTS.filter((e) => e.sessionId === (session?.id || "AG-2026-001"));
     if (opFilter === "ALL") return list;
     return list.filter((e) => e.operation === opFilter);
-  }, [session, opFilter]);
+  }, [liveEvents, session, opFilter]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`http://localhost:5000/api/sessions/${encodeURIComponent(id)}/events`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (!cancelled && Array.isArray(payload?.events)) {
+          setLiveEvents(payload.events.map(normalizeLiveEvent));
+        }
+      })
+      .catch(() => undefined);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   if (!session) {
     return (
