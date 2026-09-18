@@ -1,7 +1,8 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
-const { createSandbox } = require("./services/docker.service");
+const { createSandbox, docker } = require("./services/docker.service");
+const mongoose = require("mongoose");
 const { generateDecision } = require("./services/agent-provider.service");
 const { validateDecision } = require("./services/agent-plan-validator.service");
 const { executeSandboxCommand, inspectRunningContainer } = require("./services/agent-execution.service");
@@ -59,10 +60,24 @@ app.get("/api/events", async (req, res) => {
   }
 });
 
-app.get("/api/health", (_req, res) => {
+app.get("/api/health", async (_req, res) => {
+  let isDockerReady = false;
+  try {
+    await docker.ping();
+    isDockerReady = true;
+  } catch (err) {
+    isDockerReady = false;
+  }
+
+  const isMongoReady = mongoose.connection.readyState === 1;
+
   res.json({
     status: "ok",
     service: "agentguard-backend",
+    prerequisites: {
+      docker: isDockerReady,
+      mongodb: isMongoReady,
+    },
   });
 });
 
@@ -76,7 +91,13 @@ app.post("/api/sessions", async (req, res) => {
   let container;
 
   try {
-    const rawWorkspace = req.body?.workspace || req.body?.projectPath || `${process.cwd()}/sandbox-test`;
+    const rawWorkspace = req.body?.workspace || req.body?.projectPath;
+    if (!rawWorkspace) {
+      return res.status(400).json({
+        success: false,
+        error: "workspace path is required to create a protected session.",
+      });
+    }
     let projectPath;
     try {
       projectPath = validateWorkspacePath(rawWorkspace);

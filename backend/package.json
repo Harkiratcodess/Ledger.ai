@@ -1,8 +1,7 @@
 {
-  "name": "agentguard-backend",
-  "private": true,
+  "name": "agentguard",
   "version": "0.1.0",
-  "description": "AgentGuard Express backend foundation",
+  "description": "AgentGuard: Security middleware and protected runtime for AI agents",
   "main": "src/server.js",
   "bin": {
     "agentguard": "./bin/agentguard.js"
