@@ -1,1 +1,1 @@
-console.log("Protected workload running inside AgentGuard sandbox");
+console.log('Demo Workload Application Active');

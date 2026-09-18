@@ -1,5 +1,5 @@
 {
-  "name": "protected-demo-workload",
+  "name": "demo-workload",
   "version": "1.0.0",
-  "description": "Harmless test project for AgentGuard protected runtime"
+  "main": "index.js"
 }
