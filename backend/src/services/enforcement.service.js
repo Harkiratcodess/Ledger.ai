@@ -50,6 +50,21 @@ function isTrackedSandboxContainer(container) {
   return Boolean(container && container.id && ACTIVE_SANDBOX_CONTAINERS.has(container.id));
 }
 
+function clearSandboxContainer(container) {
+  if (!container || !container.id) {
+    return false;
+  }
+
+  const wasActive = ACTIVE_SANDBOX_CONTAINER_ID === container.id;
+  const deleted = ACTIVE_SANDBOX_CONTAINERS.delete(container.id);
+
+  if (wasActive) {
+    ACTIVE_SANDBOX_CONTAINER_ID = null;
+  }
+
+  return deleted;
+}
+
 async function pauseSandbox(container) {
   if (!isTrackedSandboxContainer(container)) {
     throw new Error("Pause denied: container is not tracked by AgentGuard.");
@@ -77,6 +92,42 @@ async function pauseSandbox(container) {
   };
 }
 
+async function resumeSandbox(container) {
+  if (!isTrackedSandboxContainer(container)) {
+    throw new Error("Resume denied: container is not tracked by AgentGuard.");
+  }
+
+  const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;
+  const inspection = await trackedContainer.inspect();
+
+  if (inspection?.State?.Running === false) {
+    return {
+      action: "resume",
+      status: "already_stopped",
+      timestamp: new Date(),
+      containerId: trackedContainer.id,
+    };
+  }
+
+  if (inspection?.State?.Paused === false) {
+    return {
+      action: "resume",
+      status: "already_running",
+      timestamp: new Date(),
+      containerId: trackedContainer.id,
+    };
+  }
+
+  await trackedContainer.unpause();
+
+  return {
+    action: "resume",
+    status: "resumed",
+    timestamp: new Date(),
+    containerId: trackedContainer.id,
+  };
+}
+
 async function killSandbox(container) {
   if (!container || !container.id) {
     throw new Error("Kill denied: no sandbox container provided.");
@@ -92,9 +143,26 @@ async function killSandbox(container) {
   }
 
   const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;
-  const beforeKill = await trackedContainer.inspect();
+  let beforeKill;
+
+  try {
+    beforeKill = await trackedContainer.inspect();
+  } catch (error) {
+    if (error.statusCode === 404) {
+      clearSandboxContainer(trackedContainer);
+      return {
+        action: "kill",
+        status: "already_stopped",
+        timestamp: new Date(),
+        containerId: trackedContainer.id,
+      };
+    }
+
+    throw error;
+  }
 
   if (beforeKill?.State?.Running === false) {
+    clearSandboxContainer(trackedContainer);
     return {
       action: "kill",
       status: "already_stopped",
@@ -105,7 +173,24 @@ async function killSandbox(container) {
 
   await trackedContainer.kill();
 
-  const afterKill = await trackedContainer.inspect();
+  let afterKill;
+  try {
+    afterKill = await trackedContainer.inspect();
+  } catch (error) {
+    if (error.statusCode === 404) {
+      clearSandboxContainer(trackedContainer);
+      return {
+        action: "kill",
+        status: "terminated",
+        timestamp: new Date(),
+        containerId: trackedContainer.id,
+      };
+    }
+
+    throw error;
+  }
+
+  clearSandboxContainer(trackedContainer);
 
   return {
     action: "kill",
@@ -186,10 +271,12 @@ async function applyRiskEnforcement(event = {}, riskAssessment = {}, context = {
 module.exports = {
   ACTIVE_SANDBOX_CONTAINERS,
   applyRiskEnforcement,
+  clearSandboxContainer,
   getActiveSandboxContainer,
   isTrackedSandboxContainer,
   killSandbox,
   pauseSandbox,
   registerSandboxContainer,
+  resumeSandbox,
   setActiveSandboxContainer,
 };

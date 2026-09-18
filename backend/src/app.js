@@ -2,7 +2,15 @@ const express = require("express");
 const cors = require("cors");
 const { createSandbox } = require("./services/docker.service");
 const { evaluateEvent } = require("./services/risk-engine");
-const { applyRiskEnforcement, getActiveSandboxContainer } = require("./services/enforcement.service");
+const {
+  applyRiskEnforcement,
+  clearSandboxContainer,
+  getActiveSandboxContainer,
+  isTrackedSandboxContainer,
+  killSandbox,
+  pauseSandbox,
+  resumeSandbox,
+} = require("./services/enforcement.service");
 const Event = require("./models/event.model")
 
 const app = express();
@@ -42,6 +50,110 @@ app.get("/api/health", (_req, res) => {
     status: "ok",
     service: "agentguard-backend",
   });
+});
+
+async function inspectActiveSandbox() {
+  const container = getActiveSandboxContainer();
+
+  if (!container || !isTrackedSandboxContainer(container)) {
+    return null;
+  }
+
+  try {
+    const inspection = await container.inspect();
+    return {
+      container,
+      state: {
+        active: true,
+        containerId: container.id,
+        status: inspection.State?.Status || "unknown",
+        running: Boolean(inspection.State?.Running),
+        paused: Boolean(inspection.State?.Paused),
+      },
+    };
+  } catch (error) {
+    if (error.statusCode === 404) {
+      clearSandboxContainer(container);
+      return null;
+    }
+
+    throw error;
+  }
+}
+
+app.get("/api/sandbox/status", async (_req, res) => {
+  try {
+    const activeSandbox = await inspectActiveSandbox();
+    return res.json(activeSandbox?.state || { active: false });
+  } catch (error) {
+    console.error("Failed to inspect active sandbox:", error.message);
+    return res.status(503).json({ success: false, error: "Active sandbox status is unavailable." });
+  }
+});
+
+app.post("/api/sandbox/pause", async (_req, res) => {
+  try {
+    const activeSandbox = await inspectActiveSandbox();
+    if (!activeSandbox) {
+      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+    }
+
+    const result = await pauseSandbox(activeSandbox.container);
+    const state = await inspectActiveSandbox();
+    return res.json({ success: true, ...result, ...(state?.state || { active: false }) });
+  } catch (error) {
+    console.error("Failed to pause active sandbox:", error.message);
+    return res.status(error.statusCode === 404 ? 404 : 409).json({
+      success: false,
+      error: "The active AgentGuard sandbox could not be paused.",
+    });
+  }
+});
+
+app.post("/api/sandbox/resume", async (_req, res) => {
+  try {
+    const activeSandbox = await inspectActiveSandbox();
+    if (!activeSandbox) {
+      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+    }
+
+    const result = await resumeSandbox(activeSandbox.container);
+    const state = await inspectActiveSandbox();
+    return res.json({ success: true, ...result, ...(state?.state || { active: false }) });
+  } catch (error) {
+    console.error("Failed to resume active sandbox:", error.message);
+    return res.status(error.statusCode === 404 ? 404 : 409).json({
+      success: false,
+      error: "The active AgentGuard sandbox could not be resumed.",
+    });
+  }
+});
+
+app.post("/api/sandbox/kill", async (_req, res) => {
+  try {
+    const activeSandbox = await inspectActiveSandbox();
+    if (!activeSandbox) {
+      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+    }
+
+    const result = await killSandbox(activeSandbox.container);
+
+    try {
+      await activeSandbox.container.remove({ force: true });
+    } catch (error) {
+      if (error.statusCode !== 404) {
+        throw error;
+      }
+    }
+
+    return res.json({ success: true, ...result, active: false, status: "removed", running: false, paused: false });
+  } catch (error) {
+    console.error("Failed to kill active sandbox:", error.message);
+    return res.status(error.statusCode === 404 ? 404 : 409).json({
+      success: false,
+      error: "The active AgentGuard sandbox could not be terminated.",
+    });
+  }
 });
 
 app.post("/api/sandbox/test", async (req, res) => {
