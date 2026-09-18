@@ -296,6 +296,8 @@ export default function Overview() {
           </div>
           <div className="p-space-md flex flex-col lg:flex-row lg:items-center justify-between gap-space-md">
             <div className="flex flex-col gap-1 font-code-dense text-code-dense">
+              <span className="text-on-surface-variant uppercase">SESSION</span>
+              <span className="text-primary truncate max-w-full">{sandbox.sessionId || "NONE"}</span>
               <span className="text-on-surface-variant uppercase">CONTAINER</span>
               <span className="text-primary truncate max-w-full">{sandbox.containerId || "NONE"}</span>
               {sandboxError && <span className="text-error">{sandboxError}</span>}

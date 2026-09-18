@@ -1,8 +1,11 @@
 const express = require("express");
 const cors = require("cors");
 const crypto = require("crypto");
-const { PassThrough } = require("stream");
 const { createSandbox } = require("./services/docker.service");
+const { generateDecision } = require("./services/agent-provider.service");
+const { validateDecision } = require("./services/agent-plan-validator.service");
+const { executeSandboxCommand, inspectRunningContainer } = require("./services/agent-execution.service");
+const { runAgentLoop } = require("./services/agent-loop.service");
 const { evaluateEvent } = require("./services/risk-engine");
 const {
   applyRiskEnforcement,
@@ -10,6 +13,7 @@ const {
   getActiveSandboxContainer,
   getActiveSandboxContext,
   getActiveSandboxMetadata,
+  getValidActiveSandboxContext,
   getTrackedSandboxContainer,
   getTrackedSandboxMetadata,
   isTrackedSandboxContainer,
@@ -162,36 +166,110 @@ app.get("/api/sessions/:sessionId/events", async (req, res) => {
   }
 });
 
-async function executeSandboxCommand(container, command) {
-  const exec = await container.exec({
-    Cmd: command,
-    AttachStdout: true,
-    AttachStderr: true,
-  });
-  const stdoutStream = new PassThrough();
-  const stderrStream = new PassThrough();
-  const stdout = [];
-  const stderr = [];
+app.post("/api/sessions/:sessionId/agent", async (req, res) => {
+  const { prompt } = req.body || {};
 
-  stdoutStream.on("data", (chunk) => stdout.push(chunk));
-  stderrStream.on("data", (chunk) => stderr.push(chunk));
+  if (typeof prompt !== "string" || prompt.trim().length === 0) {
+    return res.status(400).json({ success: false, error: "prompt must be a non-empty string." });
+  }
 
-  const stream = await exec.start({ hijack: true, stdin: false });
-  const streamEnded = new Promise((resolve, reject) => {
-    stream.once("end", resolve);
-    stream.once("error", reject);
-  });
+  try {
+    const session = await Session.findOne({ sessionId: req.params.sessionId });
+    if (!session) {
+      return res.status(404).json({ success: false, error: "Session not found." });
+    }
 
-  container.modem.demuxStream(stream, stdoutStream, stderrStream);
-  await streamEnded;
+    if (session.status !== "RUNNING") {
+      return res.status(409).json({ success: false, error: "Session is not active." });
+    }
 
-  const result = await exec.inspect();
-  return {
-    exitCode: result.ExitCode,
-    stdout: Buffer.concat(stdout).toString("utf8"),
-    stderr: Buffer.concat(stderr).toString("utf8"),
-  };
-}
+    const container = getTrackedSandboxContainer(session.containerId);
+    const metadata = getTrackedSandboxMetadata(session.containerId);
+    if (!container || metadata?.sessionId !== session.sessionId) {
+      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by AgentGuard." });
+    }
+
+    let inspection;
+    try {
+      inspection = await container.inspect();
+    } catch (error) {
+      if (error.statusCode === 404) {
+        clearSandboxContainer(container);
+        return res.status(409).json({ success: false, error: "Session sandbox no longer exists." });
+      }
+      throw error;
+    }
+
+    if (inspection.State?.Paused || !inspection.State?.Running) {
+      return res.status(409).json({ success: false, error: "Session sandbox is not running." });
+    }
+
+    setActiveSandboxContainer(container);
+    await Session.findByIdAndUpdate(session._id, { status: "RUNNING" });
+    const runId = crypto.randomUUID();
+    const startedAt = new Date();
+    console.log(`Agent run started session=${session.sessionId} run=${runId}`);
+    let loopResult;
+    try {
+      loopResult = await runAgentLoop({
+        prompt,
+        container,
+        generateDecision,
+        validateDecision,
+        executeSandboxCommand,
+        inspectRunningContainer,
+      });
+    } catch (error) {
+      return res.status(422).json({ success: false, error: error.message });
+    }
+
+    const finalExecution = loopResult.executions[loopResult.executions.length - 1];
+    const finalStatus = loopResult.status === "completed"
+      ? "COMPLETED"
+      : ["blocked", "interrupted"].includes(loopResult.status)
+        ? "PAUSED"
+        : "FAILED";
+    await Session.findByIdAndUpdate(
+      session._id,
+      {
+        status: finalStatus,
+        ...(finalExecution ? { exitCode: finalExecution.exitCode, finishedAt: finalExecution.finishedAt } : { finishedAt: new Date() }),
+        $push: {
+          ...(loopResult.executions.length > 0 ? { executions: { $each: loopResult.executions } } : {}),
+          agentRuns: {
+            runId,
+            prompt,
+            status: loopResult.status,
+            iterations: loopResult.iterations,
+            startedAt,
+            finishedAt: new Date(),
+          },
+        },
+      }
+    );
+    console.log(`Agent run finished session=${session.sessionId} run=${runId} status=${loopResult.status}`);
+
+    return res.json({
+      success: true,
+      sessionId: session.sessionId,
+      runId,
+      status: loopResult.status,
+      reason: loopResult.reason,
+      iterations: loopResult.iterations,
+      actions: loopResult.actions,
+      executions: loopResult.executions.map(({ executionId, iteration, exitCode, startedAt, finishedAt }) => ({
+        executionId,
+        iteration,
+        exitCode,
+        startedAt,
+        finishedAt,
+      })),
+    });
+  } catch (error) {
+    console.error("Failed to run AgentGuard agent plan:", error.message);
+    return res.status(502).json({ success: false, error: "Agent plan could not be generated or executed." });
+  }
+});
 
 app.post("/api/sessions/:sessionId/execute", async (req, res) => {
   const { command } = req.body || {};
@@ -244,6 +322,7 @@ app.post("/api/sessions/:sessionId/execute", async (req, res) => {
     const result = await executeSandboxCommand(container, command);
     const finishedAt = new Date();
     const execution = {
+      executionId: crypto.randomUUID(),
       command,
       ...result,
       startedAt,
@@ -363,7 +442,7 @@ app.post("/api/sandbox/kill", async (_req, res) => {
 
     const result = await killSandbox(activeSandbox.container);
     await Session.findOneAndUpdate(
-      { containerId: activeSandbox.container.id, status: { $in: ["RUNNING", "PAUSED"] } },
+      { containerId: activeSandbox.container.id, status: { $in: ["RUNNING", "PAUSED", "COMPLETED"] } },
       { status: "KILLED", finishedAt: new Date(), exitCode: null }
     );
 
@@ -432,7 +511,7 @@ app.post("/api/network-events", async (req, res) => {
       });
     }
 
-    const sandboxContext = getActiveSandboxContext();
+    const sandboxContext = await getValidActiveSandboxContext();
     const networkEvent = {
       type: "network",
       hostname,

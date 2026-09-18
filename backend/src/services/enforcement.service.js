@@ -71,6 +71,24 @@ function getActiveSandboxContext() {
   };
 }
 
+async function getValidActiveSandboxContext() {
+  const context = getActiveSandboxContext();
+  if (!context) {
+    return null;
+  }
+
+  try {
+    await context.container.inspect();
+    return context;
+  } catch (error) {
+    if (error.statusCode === 404) {
+      clearSandboxContainer(context.container);
+      return null;
+    }
+    throw error;
+  }
+}
+
 function isTrackedSandboxContainer(container) {
   return Boolean(container && container.id && ACTIVE_SANDBOX_CONTAINERS.has(container.id));
 }
@@ -300,6 +318,7 @@ module.exports = {
   getActiveSandboxContainer,
   getActiveSandboxContext,
   getActiveSandboxMetadata,
+  getValidActiveSandboxContext,
   getTrackedSandboxContainer,
   getTrackedSandboxMetadata,
   isTrackedSandboxContainer,

@@ -7,6 +7,10 @@ const eventSchema = new mongoose.Schema(
       required: true,
     },
 
+    sessionId: {
+      type: String,
+    },
+
     action: {
       type: String,
     },

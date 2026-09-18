@@ -4,7 +4,7 @@ const Session = require("../models/session.model");
 const { evaluateEvent } = require("./risk-engine");
 const {
   applyRiskEnforcement,
-  getActiveSandboxContext,
+  getValidActiveSandboxContext,
 } = require("./enforcement.service");
 
 function createFileEvent(action, filePath) {
@@ -18,7 +18,7 @@ function createFileEvent(action, filePath) {
 
 async function saveEvent(event) {
   try {
-    const sandboxContext = getActiveSandboxContext();
+    const sandboxContext = await getValidActiveSandboxContext();
     const riskAssessment = evaluateEvent(event);
     const enforcementResult = await applyRiskEnforcement(event, riskAssessment, {
       container: sandboxContext?.container,

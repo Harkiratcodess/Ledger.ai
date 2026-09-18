@@ -38,6 +38,7 @@ async function createSandbox(projectPath, options = {}) {
     projectPath,
     type: "sandbox",
     command: command.join(" "),
+    ...(options.sessionId ? { sessionId: options.sessionId } : {}),
   });
 
   return container;
