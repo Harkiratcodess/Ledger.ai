@@ -180,6 +180,73 @@ agentguard --help
 
 ---
 
+## Generic MCP Security Gateway (`agentguard-mcp`)
+
+AgentGuard includes a generic, agent-agnostic **MCP (Model Context Protocol)** Security Gateway. It exposes standard MCP tools to any compatible AI assistant (Claude Desktop, Cursor, Goose, Cline, or custom agent frameworks) so that agent tool calls are routed through the existing AgentGuard protected sandbox, filesystem integrity monitor, proxy, and risk engine.
+
+### Architecture
+
+```
+AI Coding Agent (MCP Client)
+      ↓ MCP Protocol (STDIO / JSON-RPC 2.0)
+AgentGuard MCP Gateway (`agentguard-mcp`)
+      ↓ REST API
+AgentGuard Backend
+      ↓
+Docker Sandbox Container
+  ├── Workspace-only mount (/workspace)
+  ├── Filesystem watcher (Chokidar)
+  ├── Outbound HTTP/HTTPS proxy (mitmproxy)
+  └── Real-time Risk Engine & Enforcement
+      ↓
+Enforcement Action (Allow / Record / Pause)
+```
+
+### Available MCP Tools
+
+| Tool | Description | Security Guarantees |
+|---|---|---|
+| `protected_execute` | Executes commands inside the sandbox container | Runs inside non-privileged container; never on host. Fails cleanly if sandbox is paused or killed. |
+| `protected_read_file` | Reads workspace files via relative path | Path guard prevents path traversal (`../`), absolute paths, `.ssh`, `.aws`, and credential store access. |
+| `protected_write_file` | Writes content to workspace files | Path-guarded; writes trigger filesystem watcher and risk engine. High-risk writes (`.env`, credentials) automatically pause sandbox. |
+| `protected_network_request` | Makes HTTP/HTTPS requests from inside sandbox | Traffic routes through configured container proxy (`mitmproxy`); metadata inspected against allowlist. Response bodies are not stored. |
+
+> **Important**: AgentGuard remains completely agent-agnostic. No vendor-specific code exists for any particular agent. Only operations explicitly routed through the AgentGuard MCP tools are protected.
+
+### Starting the MCP Gateway
+
+Ensure the AgentGuard backend and a protected sandbox session are running:
+
+```bash
+# 1. Start a protected session
+agentguard protect ./my-project --detach
+
+# 2. Run the MCP gateway via CLI
+agentguard-mcp
+```
+
+### MCP Client Configuration Example
+
+Add AgentGuard to your agent's MCP settings configuration (e.g., `claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "agentguard": {
+      "command": "agentguard-mcp",
+      "env": {
+        "AGENTGUARD_API_URL": "http://localhost:5000",
+        "AGENTGUARD_SESSION_ID": ""
+      }
+    }
+  }
+}
+```
+
+*Note: If `AGENTGUARD_SESSION_ID` is omitted, the gateway automatically resolves the currently active sandbox session.*
+
+---
+
 ## Testing & Verification
 
 Run the automated verification suite:

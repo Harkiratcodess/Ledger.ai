@@ -4,7 +4,8 @@
   "description": "AgentGuard: Security middleware and protected runtime for AI agents",
   "main": "src/server.js",
   "bin": {
-    "agentguard": "./bin/agentguard.js"
+    "agentguard": "./bin/agentguard.js",
+    "agentguard-mcp": "./bin/agentguard-mcp.js"
   },
   "scripts": {
     "dev": "nodemon src/server.js",
