@@ -91,7 +91,7 @@ export default function Overview() {
       const nextEvents = Array.isArray(payload?.events) ? payload.events.map(normalizeEvent) : [];
       setEvents(nextEvents);
     } catch (err) {
-      setError(err.message || "Unable to load live AgentGuard events.");
+      setError(err.message || "Unable to load live Ledger events.");
       setEvents([]);
     } finally {
       setLoading(false);
@@ -159,9 +159,9 @@ export default function Overview() {
           <div className="flex flex-wrap items-center gap-space-md">
             <span className="text-primary-container font-bold">STREAM=LIVE</span>
             <span>DATASOURCE=LOCAL API</span>
-            <span>MODE=AGENTGUARD</span>
+            <span>MODE=PROTECTED</span>
           </div>
-          <span className="text-primary">LOCAL INSTANCE</span>
+          <span className="text-primary">RUNTIME: LOCAL</span>
         </div>
 
         <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 bg-surface-container-highest">

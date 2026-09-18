@@ -283,7 +283,7 @@ export default function Settings() {
 {/* Terminal Footer Status Ribbon */}
 <div className="w-full bg-[#101010] border-t border-[#292929] px-space-lg py-space-xs flex flex-wrap items-center justify-between gap-space-md font-code-dense text-code-dense text-outline">
 <div className="flex items-center gap-space-md">
-<span>AGENTGUARD_OS: <span className="text-on-surface">DARWIN_ARM64</span></span>
+<span>LEDGER_OS: <span className="text-on-surface">DARWIN_ARM64</span></span>
 <span>DAEMON_PID: <span className="text-on-surface">41920</span></span>
 <span>AUDIT_MODE: <span className="text-primary-container">ZERO_KNOWLEDGE</span></span>
 </div>

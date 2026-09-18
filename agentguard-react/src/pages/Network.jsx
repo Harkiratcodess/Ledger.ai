@@ -114,7 +114,7 @@ export default function Network() {
               NETWORK <span className="text-on-surface-variant font-headline-lg text-headline-lg">EVENTS</span>
             </h1>
             <p className="font-body-sm text-body-sm text-on-surface-variant uppercase tracking-wider mt-1">
-              Local HTTP metadata captured from the AgentGuard proxy
+              Local HTTP metadata captured from the Ledger security proxy
             </p>
           </div>
           <div className="flex items-center gap-space-lg bg-surface-container p-space-sm border border-surface-container-highest">

@@ -11,7 +11,7 @@ export default function SandboxSetup() {
   const [sessionName, setSessionName] = useState("demo-session");
   const [status, setStatus] = useState("IDLE");
   const [consoleLines, setConsoleLines] = useState([
-    "[00:00.01] INIT AGENTGUARD UI PROTOTYPE",
+    "[00:00.01] INIT LEDGER PROTECTED RUNTIME",
     "[00:00.02] MOCK PROVISIONING CONSOLE READY",
     "[00:00.04] AWAITING START SANDBOX (UI SIMULATION)",
   ]);

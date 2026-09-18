@@ -38,10 +38,10 @@ export default function Layout({ children }) {
           </button>
           <div className="flex flex-col justify-center min-w-0">
             <span className="font-headline-sm text-headline-sm uppercase text-primary tracking-wider">
-              AGENTGUARD
+              LEDGER
             </span>
             <span className="font-label-sm text-label-sm uppercase text-on-surface-variant tracking-widest hidden sm:block truncate">
-              REAL-TIME BEHAVIOR AUDITOR
+              AI AGENT SECURITY RUNTIME
             </span>
           </div>
         </div>
@@ -112,7 +112,7 @@ export default function Layout({ children }) {
               INSTANCE: <span className="text-primary">LOCAL</span>
             </div>
             <div>
-              MODE: <span className="text-primary-container">UI PROTOTYPE</span>
+              MODE: <span className="text-primary-container">PROTECTED RUNTIME</span>
             </div>
           </div>
         </div>
