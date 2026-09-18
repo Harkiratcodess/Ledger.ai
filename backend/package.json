@@ -4,7 +4,9 @@
   "description": "AgentGuard: Security middleware and protected runtime for AI agents",
   "main": "src/server.js",
   "bin": {
+    "ledger": "./bin/agentguard.js",
     "agentguard": "./bin/agentguard.js",
+    "ledger-mcp": "./bin/agentguard-mcp.js",
     "agentguard-mcp": "./bin/agentguard-mcp.js"
   },
   "scripts": {

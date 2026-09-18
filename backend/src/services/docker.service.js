@@ -37,6 +37,7 @@ async function createSandbox(projectPath, options = {}) {
   const container = await docker.createContainer({
     Image: image,
     Cmd: command,
+    WorkingDir: "/workspace",
     Env: env,
     HostConfig: {
       Binds: [

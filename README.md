@@ -1,136 +1,142 @@
-# AgentGuard
+# Ledger
 
-**Security Middleware & Protected Runtime for AI Coding Agents**
+**Protected Execution Boundary & Security Gateway for AI Coding Agents**
 
-AgentGuard creates a secure, monitored execution runtime around existing AI coding platforms and agents (such as Kilo, Claude Code, OpenAI Codex, OpenRouter-driven agents, and local autonomous scripts). 
+Ledger provides a security boundary for AI-agent workloads. Its **AgentGuard security runtime** monitors filesystem and network activity in real time and automatically pauses the execution sandbox when configured high-risk activity is detected.
 
-AgentGuard is **not** an AI agent itself. It is security middleware: the user does **not** need to modify the agent's source code or adopt proprietary agent SDKs.
+Ledger is **agent-agnostic**: it works with existing AI coding platforms and agents (such as Claude Desktop, Cursor, Goose, Cline, Kilo, OpenAI Codex, or custom autonomous scripts) without modifying the agent's code or requiring proprietary agent SDKs.
+
+> **Security Scope & Boundary**:  
+> Ledger provides a protected execution boundary for operations executed inside its managed Docker sandbox or routed through the Ledger MCP Gateway. Installing Ledger does **not** automatically control every arbitrary process running on your host machine. Only operations routed through the Ledger/AgentGuard protected runtime are covered.
 
 ---
 
 ## Architecture
 
 ```
-User
-  ↓
-Existing AI Coding Platform / Agent (agent-agnostic)
-  ↓
-AgentGuard Protected Runtime
-  ↓
-Docker Sandbox Container
-  ├── Workspace-only bind mount (/workspace)
-  ├── Real-time filesystem integrity monitoring
-  ├── Outbound HTTP/HTTPS proxy inspection (mitmproxy)
-  └── Risk Evaluation Engine
-  ↓
-Enforcement Action (Allow / Record / Pause)
-  ↓
-User's Managed Workspace
+AI Coding Agent (MCP Client)         External Agent Workload / Developer
+            │                                         │
+            │  STDIO / JSON-RPC                       │  CLI
+            ▼                                         ▼
+   Ledger MCP Gateway                        Ledger CLI (`ledger`)
+   (`ledger-mcp`)                                     │
+            │                                         │
+            └───────────────┬─────────────────────────┘
+                            │ REST API (`:5000`)
+                            ▼
+           AgentGuard Security Runtime
+                            │
+              Docker Sandbox Container
+          ┌───────────────────────────────────┐
+          │ Workspace-only mount (/workspace) │
+          │ Filesystem monitoring (Chokidar)  │
+          │ Outbound HTTP proxy (mitmproxy)   │
+          │ Real-Time Risk Evaluation Engine  │
+          └───────────────────────────────────┘
+                            │
+           Automated Enforcement Action
+             ├── LOW      → Allow
+             ├── MEDIUM   → Record & Log
+             └── HIGH     → Pause Sandbox (Freeze Container)
+                            │
+                    MongoDB & Dashboard
 ```
 
 ---
 
-## Security Model
+## Why Ledger Exists
 
-AgentGuard isolates workloads inside dedicated Docker containers and monitors actions in real time:
+Autonomous AI coding agents generate and execute code, invoke terminal commands, and make outbound network requests. Without containment, an agent could inadvertently:
+- Read or overwrite sensitive host files (`~/.ssh`, `~/.aws`, `.env`, system files).
+- Exfiltrate secrets to unverified endpoints.
+- Execute destructive shell commands directly on your development workstation.
 
-- **Isolated Docker Sandbox**: The agent workload executes inside a non-privileged Docker container. The Docker socket is never mounted. Host networking is disabled.
-- **Workspace-Only Mounting**: Only the explicitly targeted project directory is mounted to `/workspace`. Deny-lists strictly prevent mounting root (`/`, `C:\`), user home directories (`~`), SSH keys (`.ssh`), cloud credentials (`.aws`), or system paths.
-- **Real-Time Filesystem Monitoring**: File modifications within the workspace are captured via filesystem events and evaluated by the risk engine.
-- **Network Observability**: Sandbox network traffic is proxied through an inspection addon. Metadata (domain, port, method, status code) is analyzed against baseline allowlists. **No request or response bodies are stored.**
-- **Non-Destructive Enforcement**: When HIGH risk is detected (e.g. sensitive credential file access, suspicious outbound exfiltration targets), the sandbox container is **automatically paused** to prevent damage without destroying uncommitted code. High-risk containers are never automatically resumed.
-- **Scope Boundary**: AgentGuard secures and constrains actions executed inside the protected sandbox. It does **not** claim to protect the entire host operating system outside the container boundary.
+Ledger solves this by wrapping agent activity in an isolated, monitored execution runtime with non-destructive enforcement: if high-risk activity is detected, Ledger **freezes the sandbox immediately** without destroying uncommitted developer code.
 
 ---
 
 ## Prerequisites
 
-Before starting AgentGuard, ensure the following prerequisites are installed and running:
+Before starting Ledger, ensure the following are installed and running:
 
 1. **Node.js**: Version 18.0.0 or higher (`node -v`)
 2. **Docker**: Docker Desktop or Docker Engine running (`docker info`)
 3. **MongoDB**: Local or cloud MongoDB instance running on port 27017 (`mongod`)
-4. **mitmproxy** (optional for network interception): `mitmdump` installed on host or container
+4. **mitmproxy** (optional, for network observability): `mitmdump` installed on host or container
 
 ---
 
 ## Installation
 
-### From Source (Local Development)
+### Local Developer Installation
+
+From the project root:
 
 ```bash
-# Clone repository
-git clone https://github.com/Harkiratcodess/Ledger.ai.git
-cd Ledger.ai/backend
+# Navigate to the backend directory
+cd backend
 
 # Install dependencies
 npm install
 
-# Link CLI globally
+# Link binaries globally
 npm link
 ```
 
-Once linked, the `agentguard` command is available system-wide.
+Once linked, the following CLI commands are available system-wide:
+- **`ledger`**: Primary developer CLI
+- **`ledger-mcp`**: Generic MCP Security Gateway
+- **`agentguard`**: Backwards-compatible CLI alias
+- **`agentguard-mcp`**: Backwards-compatible MCP binary alias
 
-### Environment Configuration
-
-Copy the sample environment file and adjust if necessary:
+Verify installation from any directory:
 
 ```bash
-cp .env.example .env
+ledger --version
+ledger --help
 ```
-
-Key environment variables:
-| Variable | Default | Description |
-|---|---|---|
-| `PORT` | `5000` | AgentGuard backend API port |
-| `MONGODB_URI` | `mongodb://localhost:27017/agentguard` | MongoDB connection URI |
-| `AGENTGUARD_PROXY_HOST` | `host.docker.internal` | Proxy hostname accessible from container |
-| `AGENTGUARD_PROXY_PORT` | `8080` | Proxy port |
-| `AGENTGUARD_SANDBOX_IMAGE` | `node:20-slim` | Base Docker image for sandboxes |
-| `AGENTGUARD_API_URL` | `http://localhost:5000` | Backend API URL used by CLI |
 
 ---
 
-## Starting the AgentGuard Services
+## Starting Ledger Services
 
-In your terminal:
+In your terminal windows:
 
 ```bash
-# Terminal 1: Start AgentGuard backend
+# Terminal 1: Start AgentGuard backend service
 cd backend
 npm start
 
 # Terminal 2: Start mitmproxy (for network visibility)
 mitmdump -p 8080 -s backend/src/services/mitmproxy_network_addon.py --set flow_detail=1
 
-# Terminal 3 (Optional): Start React Dashboard
+# Terminal 3 (Optional): Start React Observability Dashboard
 cd agentguard-react
 npm run dev
 ```
 
 ---
 
-## CLI Commands
+## CLI Workflow
 
 ### 1. Protect a Workspace
 
-Start a protected sandbox for a target project directory:
+Start a protected sandbox for any target project directory outside the Ledger source tree:
 
 ```bash
-# Interactive mode (cleans up on Ctrl+C)
-agentguard protect ./my-project
-
 # Detached background mode
-agentguard protect ./my-project --detach
+ledger protect ./my-project --detach
+
+# Interactive mode (cleans up on Ctrl+C)
+ledger protect ./my-project
 
 # Run a workload command inside sandbox and immediately clean up
-agentguard protect ./my-project --exec "npm test"
+ledger protect ./my-project --exec "npm test"
 ```
 
 Output:
 ```text
-AgentGuard protected runtime started
+Ledger — AgentGuard protected runtime started
 
 Workspace: /path/to/my-project
 Session: AG-20260918-123456-abcdef
@@ -143,97 +149,60 @@ Risk enforcement: enabled
 ### 2. Check Sandbox Status
 
 ```bash
-agentguard status
+ledger status
 ```
 
-Or for machine-readable JSON:
+For machine-readable JSON:
 ```bash
-agentguard status --json
+ledger status --json
 ```
 
-### 3. Execute Commands Inside the Sandbox
+### 3. Execute Commands in the Sandbox
+
+All commands execute strictly inside the containerized `/workspace`:
 
 ```bash
-agentguard exec "ls -la /workspace"
-agentguard exec "npm run build"
+ledger exec "ls -la"
+ledger exec "npm test"
 ```
 
-### 4. Manual Enforcement & Lifecycle Controls
+### 4. Lifecycle & Enforcement Controls
 
 ```bash
 # Freeze the container
-agentguard pause
+ledger pause
 
 # Unfreeze the container
-agentguard resume
+ledger resume
 
-# Terminate and clean up the container
-agentguard kill
-```
-
-### 5. Version and Help
-
-```bash
-agentguard --version
-agentguard --help
+# Terminate container and finalize session
+ledger kill
 ```
 
 ---
 
-## Generic MCP Security Gateway (`agentguard-mcp`)
+## Generic MCP Security Gateway (`ledger-mcp`)
 
-AgentGuard includes a generic, agent-agnostic **MCP (Model Context Protocol)** Security Gateway. It exposes standard MCP tools to any compatible AI assistant (Claude Desktop, Cursor, Goose, Cline, or custom agent frameworks) so that agent tool calls are routed through the existing AgentGuard protected sandbox, filesystem integrity monitor, proxy, and risk engine.
-
-### Architecture
-
-```
-AI Coding Agent (MCP Client)
-      ↓ MCP Protocol (STDIO / JSON-RPC 2.0)
-AgentGuard MCP Gateway (`agentguard-mcp`)
-      ↓ REST API
-AgentGuard Backend
-      ↓
-Docker Sandbox Container
-  ├── Workspace-only mount (/workspace)
-  ├── Filesystem watcher (Chokidar)
-  ├── Outbound HTTP/HTTPS proxy (mitmproxy)
-  └── Real-time Risk Engine & Enforcement
-      ↓
-Enforcement Action (Allow / Record / Pause)
-```
+Ledger includes a generic, agent-agnostic **Model Context Protocol (MCP)** Security Gateway. It exposes standard tools to any MCP-compatible AI assistant (Claude Desktop, Cursor, Goose, Cline, or custom agent frameworks) so that tool calls route through Ledger's protected sandbox.
 
 ### Available MCP Tools
 
 | Tool | Description | Security Guarantees |
 |---|---|---|
-| `protected_execute` | Executes commands inside the sandbox container | Runs inside non-privileged container; never on host. Fails cleanly if sandbox is paused or killed. |
-| `protected_read_file` | Reads workspace files via relative path | Path guard prevents path traversal (`../`), absolute paths, `.ssh`, `.aws`, and credential store access. |
-| `protected_write_file` | Writes content to workspace files | Path-guarded; writes trigger filesystem watcher and risk engine. High-risk writes (`.env`, credentials) automatically pause sandbox. |
-| `protected_network_request` | Makes HTTP/HTTPS requests from inside sandbox | Traffic routes through configured container proxy (`mitmproxy`); metadata inspected against allowlist. Response bodies are not stored. |
+| `protected_execute` | Executes shell commands in the sandbox container | Runs inside the container at `/workspace`; never on host. Blocked when paused. |
+| `protected_read_file` | Reads workspace files via relative path | Path guard blocks `../`, absolute paths (`/`, `C:\`), `.ssh`, `.aws`, and credentials. |
+| `protected_write_file` | Writes content to workspace files | Triggers filesystem watcher and risk engine. Writing to `.env` or sensitive paths pauses sandbox. |
+| `protected_network_request` | Makes HTTP/HTTPS requests from inside sandbox | Routes through container proxy (`mitmproxy`); metadata audited against allowlists. Response bodies are never stored. |
 
-> **Important**: AgentGuard remains completely agent-agnostic. No vendor-specific code exists for any particular agent. Only operations explicitly routed through the AgentGuard MCP tools are protected.
+### Connecting an MCP-Compatible Agent
 
-### Starting the MCP Gateway
-
-Ensure the AgentGuard backend and a protected sandbox session are running:
-
-```bash
-# 1. Start a protected session
-agentguard protect ./my-project --detach
-
-# 2. Run the MCP gateway via CLI
-agentguard-mcp
-```
-
-### MCP Client Configuration Example
-
-Add AgentGuard to your agent's MCP settings configuration (e.g., `claude_desktop_config.json`):
+Add Ledger to your agent's MCP configuration file (e.g. `claude_desktop_config.json`):
 
 ```json
 {
   "mcpServers": {
-    "agentguard": {
-      "command": "agentguard-mcp",
+    "ledger": {
+      "command": "ledger-mcp",
       "env": {
         "AGENTGUARD_API_URL": "http://localhost:5000",
         "AGENTGUARD_SESSION_ID": ""
@@ -243,23 +212,46 @@ Add AgentGuard to your agent's MCP settings configuration (e.g., `claude_desktop
 }
 ```
 
-*Note: If `AGENTGUARD_SESSION_ID` is omitted, the gateway automatically resolves the currently active sandbox session.*
+*Note: If `AGENTGUARD_SESSION_ID` is left empty, the gateway automatically connects to the currently active sandbox session.*
+
+---
+
+## How Risk Detection & Enforcement Works
+
+1. **Filesystem Integrity**: Modifications inside `/workspace` are detected in real time by Chokidar and evaluated by the AgentGuard risk engine.
+2. **Network Observability**: Sandbox outbound HTTP/HTTPS requests pass through the mitmproxy addon. Only metadata (hostname, method, status code, timestamp) is persisted. **No request or response bodies are stored.**
+3. **Risk Scoring**:
+   - **LOW**: Normal coding activity within the workspace or approved baseline domains (`example.com`, `localhost`, etc.). Action: `allow`.
+   - **MEDIUM**: Unrecognized outbound destinations or anomalous tool usage. Action: `record` (logged in database and dashboard).
+   - **HIGH**: Sensitive credential path access (`.env`, `.ssh`, `.aws`, private keys, secret tokens). Action: **automatic sandbox pause** (`container.pause()`).
+4. **Non-Destructive Freeze**: High-risk containers are frozen in place. The agent cannot execute further commands, but files remain intact on the developer's workstation.
+5. **No Auto-Resume**: The sandbox will never resume on its own. The developer must inspect the alert and explicitly run `ledger resume` or `ledger kill`.
+
+---
+
+## Limitations
+
+- **Container Image**: Default sandbox image is `node:20-slim` (Linux). Workloads requiring Windows-native binaries must supply an alternative image via `AGENTGUARD_SANDBOX_IMAGE`.
+- **Protected Boundary Only**: Ledger secures operations routed into the Docker sandbox or through `ledger-mcp`. It does not intercept raw host processes or arbitrary system calls outside the container boundary.
+- **Proxy Scope**: Outbound network inspection applies to HTTP/HTTPS traffic honoring standard proxy environment variables (`HTTP_PROXY`, `HTTPS_PROXY`).
+- **Single Active CLI Sandbox**: The CLI defaults commands (`exec`, `pause`, `resume`, `kill`) to the primary active sandbox unless targeted via backend APIs.
 
 ---
 
 ## Testing & Verification
 
-Run the automated verification suite:
+Run the automated verification test suites:
 
 ```bash
-node scratch/phase9_tests.js
+# Complete Phase 13 End-to-End Product & Workflow Test
+node scratch/phase13_e2e_test.js
+
+# Phase 12 MCP Security Gateway Tests (32/32)
+node scratch/phase12_mcp_test.js
+
+# Phase 11 Real Agent Workload Validation (43/43)
+node scratch/phase11_workload_test.js
+
+# Phase 10 CLI & Packaging Tests (47/47)
+node scratch/phase10_tests.js
 ```
-
----
-
-## Current Limitations
-
-- **Container Image Support**: Defaults to Linux-based containers (`node:20-slim`). Workloads requiring Windows-native binaries must supply a compatible Windows container image.
-- **Single Active Interactive Sandbox per CLI**: While the backend supports concurrent sessions, the CLI default commands (`exec`, `pause`, `resume`, `kill`) target the primary active sandbox unless `--session <id>` is specified.
-- **Proxy Interception Scope**: Network monitoring relies on HTTP/HTTPS proxy configuration. Raw TCP or non-proxied UDP traffic bypassing standard proxy environment variables is blocked by container isolation but not deeply inspected.
-- **Host Scope**: Only actions routed through the protected container boundary are governed. AgentGuard does not hook arbitrary host OS kernel calls.

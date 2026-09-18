@@ -8,8 +8,10 @@ const packageInfo = require("../package.json");
 const DEFAULT_BACKEND_URL = process.env.AGENTGUARD_API_URL || "http://localhost:5000";
 
 function printHelp() {
+  const isLedger = process.argv[1] && path.basename(process.argv[1], ".js").toLowerCase().includes("ledger");
+  const bin = isLedger ? "ledger" : "agentguard";
   console.log(`
-AgentGuard Protected Runtime CLI (v${packageInfo.version})
+Ledger CLI — powered by AgentGuard Protected Security Runtime (v${packageInfo.version})
 
 USAGE:
   agentguard protect <workspace> [options]

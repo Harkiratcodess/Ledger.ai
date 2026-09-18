@@ -4,6 +4,7 @@ const { PassThrough } = require("stream");
 async function executeSandboxCommand(container, command) {
   const exec = await container.exec({
     Cmd: command,
+    WorkingDir: "/workspace",
     AttachStdout: true,
     AttachStderr: true,
   });
