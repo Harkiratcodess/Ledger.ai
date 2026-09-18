@@ -29,12 +29,20 @@ function normalizeHostname(value) {
   }
 }
 
-function looksInsideWorkspace(path) {
+function looksInsideWorkspace(path, workspacePath) {
   if (!path) {
     return false;
   }
 
-  const normalized = String(path).replace(/\\/g, "/");
+  const normalized = String(path).replace(/\\/g, "/").toLowerCase();
+
+  if (workspacePath) {
+    const normalizedWs = String(workspacePath).replace(/\\/g, "/").toLowerCase();
+    if (normalized.startsWith(normalizedWs) || normalized === normalizedWs) {
+      return true;
+    }
+  }
+
   return (
     normalized.includes("/workspace/") ||
     normalized.includes("\\workspace\\") ||
@@ -92,7 +100,7 @@ function evaluateEvent(event = {}) {
     const rawPath = String(event.path || "");
     const lowerPath = rawPath.toLowerCase();
     const sensitivePathMatch = SENSITIVE_PATH_PATTERNS.some((pattern) => pattern.test(lowerPath));
-    const outsideWorkspace = rawPath && !looksInsideWorkspace(rawPath);
+    const outsideWorkspace = rawPath && !looksInsideWorkspace(rawPath, event.workspace || event.projectPath);
 
     if (sensitivePathMatch && outsideWorkspace) {
       return {

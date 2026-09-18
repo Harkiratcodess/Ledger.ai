@@ -76,6 +76,10 @@ const sessionSchema = new mongoose.Schema(
       type: String,
     },
 
+    workspace: {
+      type: String,
+    },
+
     startedAt: {
       type: Date,
     },

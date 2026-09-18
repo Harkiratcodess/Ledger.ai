@@ -22,8 +22,10 @@ const {
   resumeSandbox,
   setActiveSandboxContainer,
 } = require("./services/enforcement.service");
-const Event = require("./models/event.model")
+const Event = require("./models/event.model");
 const Session = require("./models/session.model");
+const { watchProject } = require("./services/file-watcher.service");
+const { validateWorkspacePath } = require("./utils/workspace-validator");
 
 const app = express();
 
@@ -69,22 +71,35 @@ function createSessionId() {
   return `AG-${stamp}-${crypto.randomBytes(3).toString("hex")}`;
 }
 
-app.post("/api/sessions", async (_req, res) => {
+app.post("/api/sessions", async (req, res) => {
   let session;
   let container;
 
   try {
+    const rawWorkspace = req.body?.workspace || req.body?.projectPath || `${process.cwd()}/sandbox-test`;
+    let projectPath;
+    try {
+      projectPath = validateWorkspacePath(rawWorkspace);
+    } catch (validationError) {
+      return res.status(400).json({
+        success: false,
+        error: validationError.message,
+      });
+    }
+
     session = await Session.create({
       sessionId: createSessionId(),
       status: "CREATED",
+      workspace: projectPath,
     });
-    const projectPath = `${process.cwd()}/sandbox-test`;
+
     container = await createSandbox(projectPath, {
       command: ["sleep", "600"],
       sessionId: session.sessionId,
     });
 
     await container.start();
+    watchProject(projectPath);
 
     const startedAt = new Date();
     const updatedSession = await Session.findByIdAndUpdate(
@@ -92,9 +107,10 @@ app.post("/api/sessions", async (_req, res) => {
       {
         status: "RUNNING",
         containerId: container.id,
+        workspace: projectPath,
         startedAt,
       },
-      { new: true }
+      { returnDocument: "after" }
     );
 
     return res.status(201).json({ success: true, session: updatedSession });
@@ -328,13 +344,12 @@ app.post("/api/sessions/:sessionId/execute", async (req, res) => {
       startedAt,
       finishedAt,
     };
-    const status = result.exitCode === 0 ? "COMPLETED" : "FAILED";
+    const status = "RUNNING";
     const updatedSession = await Session.findByIdAndUpdate(
       session._id,
       {
         status,
         exitCode: result.exitCode,
-        finishedAt,
         $push: { executions: execution },
       },
       { new: true }

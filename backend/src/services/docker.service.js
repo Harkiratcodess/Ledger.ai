@@ -1,5 +1,6 @@
 const Docker = require("dockerode");
 const { registerSandboxContainer } = require("./enforcement.service");
+const { validateWorkspacePath } = require("../utils/workspace-validator");
 
 const docker = new Docker();
 
@@ -11,9 +12,7 @@ async function testDocker() {
 }
 
 async function createSandbox(projectPath, options = {}) {
-  if (!projectPath) {
-    throw new Error("Project path is required");
-  }
+  const validatedPath = validateWorkspacePath(projectPath);
 
   const command = options.command || ["sleep", "600"];
   const env = options.env || [
@@ -29,13 +28,13 @@ async function createSandbox(projectPath, options = {}) {
     Env: env,
     HostConfig: {
       Binds: [
-        `${projectPath}:/workspace`,
+        `${validatedPath}:/workspace`,
       ],
     },
   });
 
   registerSandboxContainer(container, {
-    projectPath,
+    projectPath: validatedPath,
     type: "sandbox",
     command: command.join(" "),
     ...(options.sessionId ? { sessionId: options.sessionId } : {}),

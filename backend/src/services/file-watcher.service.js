@@ -1,3 +1,4 @@
+const path = require("path");
 const chokidar = require("chokidar");
 const Event = require("../models/event.model");
 const Session = require("../models/session.model");
@@ -7,11 +8,14 @@ const {
   getValidActiveSandboxContext,
 } = require("./enforcement.service");
 
-function createFileEvent(action, filePath) {
+const ACTIVE_WATCHERS = new Map();
+
+function createFileEvent(action, filePath, workspace) {
   return {
     type: "filesystem",
     action,
     path: filePath,
+    ...(workspace ? { workspace } : {}),
     timestamp: new Date(),
   };
 }
@@ -19,12 +23,20 @@ function createFileEvent(action, filePath) {
 async function saveEvent(event) {
   try {
     const sandboxContext = await getValidActiveSandboxContext();
-    const riskAssessment = evaluateEvent(event);
-    const enforcementResult = await applyRiskEnforcement(event, riskAssessment, {
+    const workspace = event.workspace || sandboxContext?.metadata?.projectPath;
+    const enrichedEvent = {
+      ...event,
+      workspace,
+    };
+    const riskAssessment = evaluateEvent(enrichedEvent);
+    const enforcementResult = await applyRiskEnforcement(enrichedEvent, riskAssessment, {
       container: sandboxContext?.container,
     });
     const savedEvent = await Event.create({
-      ...event,
+      type: event.type,
+      action: event.action,
+      path: event.path,
+      timestamp: event.timestamp,
       ...(sandboxContext?.metadata?.sessionId ? { sessionId: sandboxContext.metadata.sessionId } : {}),
       riskLevel: riskAssessment.riskLevel,
       riskScore: riskAssessment.riskScore,
@@ -52,7 +64,14 @@ async function saveEvent(event) {
 }
 
 function watchProject(projectPath, onEvent) {
-  const watcher = chokidar.watch(projectPath, {
+  if (!projectPath) return null;
+  const resolvedPath = path.resolve(projectPath);
+
+  if (ACTIVE_WATCHERS.has(resolvedPath)) {
+    return ACTIVE_WATCHERS.get(resolvedPath);
+  }
+
+  const watcher = chokidar.watch(resolvedPath, {
     persistent: true,
     ignoreInitial: true,
   });
@@ -68,26 +87,42 @@ function watchProject(projectPath, onEvent) {
   };
 
   watcher.on("add", (filePath) => {
-    handleEvent(createFileEvent("created", filePath));
+    handleEvent(createFileEvent("created", filePath, resolvedPath));
   });
 
   watcher.on("change", (filePath) => {
-    handleEvent(createFileEvent("changed", filePath));
+    handleEvent(createFileEvent("changed", filePath, resolvedPath));
   });
 
   watcher.on("unlink", (filePath) => {
-    handleEvent(createFileEvent("deleted", filePath));
+    handleEvent(createFileEvent("deleted", filePath, resolvedPath));
   });
 
   watcher.on("error", (error) => {
     console.error("Filesystem watcher error:", error);
   });
 
-  console.log(`Watching project: ${projectPath}`);
+  console.log(`Watching project: ${resolvedPath}`);
+  ACTIVE_WATCHERS.set(resolvedPath, watcher);
 
   return watcher;
 }
 
+function unwatchProject(projectPath) {
+  if (!projectPath) return false;
+  const resolvedPath = path.resolve(projectPath);
+  const watcher = ACTIVE_WATCHERS.get(resolvedPath);
+  if (watcher) {
+    watcher.close();
+    ACTIVE_WATCHERS.delete(resolvedPath);
+    console.log(`Stopped watching project: ${resolvedPath}`);
+    return true;
+  }
+  return false;
+}
+
 module.exports = {
+  ACTIVE_WATCHERS,
   watchProject,
+  unwatchProject,
 };
