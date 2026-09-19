@@ -19,6 +19,7 @@ const { spawn, execSync } = require("child_process");
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
+const net = require("net");
 
 const API_URL = process.env.AGENTGUARD_API_URL || "http://localhost:5000";
 const ROOT_DIR = path.resolve(__dirname, "..");
@@ -26,7 +27,25 @@ const TEMP_WORKSPACE = path.resolve(os.tmpdir(), "ledger-demo-project-" + Date.n
 
 let passed = 0;
 let failed = 0;
+let skipped = 0;
 const results = [];
+
+function skip(name, reason = "") {
+  skipped++;
+  results.push({ pass: true, skipped: true, name, detail: reason });
+  console.log(`  ⏭  SKIP  ${name} — ${reason}`);
+}
+
+function isPortOpen(port, host = "127.0.0.1", timeout = 1000) {
+  return new Promise((resolve) => {
+    const sock = new net.Socket();
+    sock.setTimeout(timeout);
+    sock.on("connect", () => { sock.destroy(); resolve(true); });
+    sock.on("error", () => { sock.destroy(); resolve(false); });
+    sock.on("timeout", () => { sock.destroy(); resolve(false); });
+    sock.connect(port, host);
+  });
+}
 
 function pass(name, detail = "") {
   passed++;
@@ -173,6 +192,17 @@ async function main() {
   // PART 1 — INSTALLATION & CLI HEALTH
   // ───────────────────────────────────────────────────────────────────────────
   console.log("── PART 1: INSTALLATION & COMMAND AVAILABILITY ─────────────────");
+
+  await check("ledger init writes .ledger/config.json", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "ledger-init-"));
+    const res = runCli("ledger", ["init"], dir);
+    assert(res.code === 0, `init exit ${res.code}: ${res.output}`);
+    assert(fs.existsSync(path.join(dir, ".ledger", "config.json")), "config.json missing");
+    const cfg = JSON.parse(fs.readFileSync(path.join(dir, ".ledger", "config.json"), "utf8"));
+    assert(cfg.sandboxImage, "sandboxImage missing");
+    fs.rmSync(dir, { recursive: true, force: true });
+    return "init created .ledger/config.json";
+  });
 
   await check("ledger --help works globally outside backend dir", () => {
     const res = runCli("ledger", ["--help"], os.tmpdir());
@@ -391,17 +421,23 @@ async function main() {
     return "computed Sum: 5";
   });
 
-  await check("Step 7: Harmless network request via proxy (protected_network_request)", async () => {
-    const res = await mcpCall("tools/call", {
-      name: "protected_network_request",
-      arguments: { url: "http://example.com/", method: "GET" },
+  const proxyAvailable = await isPortOpen(8080);
+
+  if (!proxyAvailable) {
+    skip("Step 7: Harmless network request via proxy (protected_network_request)", "mitmproxy not detected on port 8080");
+  } else {
+    await check("Step 7: Harmless network request via proxy (protected_network_request)", async () => {
+      const res = await mcpCall("tools/call", {
+        name: "protected_network_request",
+        arguments: { url: "http://example.com/", method: "GET" },
+      });
+      assert(!res.result?.isError, `Tool returned error: ${res.result?.content?.[0]?.text}`);
+      const data = JSON.parse(res.result.content[0].text);
+      assert(data.statusCode === 200, `HTTP status ${data.statusCode}`);
+      assert(data.note.includes("metadata only"), "Metadata note missing");
+      return `HTTP ${data.statusCode} through mitmproxy`;
     });
-    assert(!res.result?.isError, `Tool returned error: ${res.result?.content?.[0]?.text}`);
-    const data = JSON.parse(res.result.content[0].text);
-    assert(data.statusCode === 200, `HTTP status ${data.statusCode}`);
-    assert(data.note.includes("metadata only"), "Metadata note missing");
-    return `HTTP ${data.statusCode} through mitmproxy`;
-  });
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // PART 6 — OBSERVABILITY & RISK VERIFICATION
@@ -422,19 +458,23 @@ async function main() {
     return `${fsEvents.length} fs events recorded (all LOW risk / allow)`;
   });
 
-  await check("Network request recorded with metadata only (no body stored)", async () => {
-    const { data } = await api("GET", `/api/sessions/${activeSessionId}/events`);
-    const events = data.events || [];
-    const netEvent = events.find((e) => e.type === "network");
-    assert(netEvent, "No network event recorded");
-    assert(netEvent.hostname === "example.com" || netEvent.url?.includes("example.com"), "Wrong hostname");
-    assert(netEvent.method === "GET", `Expected GET, got ${netEvent.method}`);
-    assert(netEvent.statusCode === 200, `Expected 200, got ${netEvent.statusCode}`);
-    assert(netEvent.body === undefined, "Security policy violation: body was stored");
-    assert(netEvent.responseBody === undefined, "Security policy violation: responseBody was stored");
-    assert(netEvent.riskLevel === "LOW", `Expected LOW risk for allowlist, got ${netEvent.riskLevel}`);
-    return "example.com GET:200 metadata-only confirmed";
-  });
+  if (!proxyAvailable) {
+    skip("Network request recorded with metadata only (no body stored)", "mitmproxy not detected on port 8080");
+  } else {
+    await check("Network request recorded with metadata only (no body stored)", async () => {
+      const { data } = await api("GET", `/api/sessions/${activeSessionId}/events`);
+      const events = data.events || [];
+      const netEvent = events.find((e) => e.type === "network");
+      assert(netEvent, "No network event recorded");
+      assert(netEvent.hostname === "example.com" || netEvent.url?.includes("example.com"), "Wrong hostname");
+      assert(netEvent.method === "GET", `Expected GET, got ${netEvent.method}`);
+      assert(netEvent.statusCode === 200, `Expected 200, got ${netEvent.statusCode}`);
+      assert(netEvent.body === undefined, "Security policy violation: body was stored");
+      assert(netEvent.responseBody === undefined, "Security policy violation: responseBody was stored");
+      assert(netEvent.riskLevel === "LOW", `Expected LOW risk for allowlist, got ${netEvent.riskLevel}`);
+      return "example.com GET:200 metadata-only confirmed";
+    });
+  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // PART 7 — HIGH-RISK SENSITIVE PATH PROTECTION & PAUSE
@@ -622,16 +662,17 @@ async function main() {
   console.log("\n═══════════════════════════════════════════════════════════════");
   console.log("  PHASE 13 E2E RESULTS");
   console.log("───────────────────────────────────────────────────────────────");
-  console.log(`  Total Tests : ${passed + failed}`);
+  console.log(`  Total Tests : ${passed + failed + skipped}`);
   console.log(`  ✅ Passed    : ${passed}`);
   console.log(`  ❌ Failed    : ${failed}`);
+  console.log(`  ⏭  Skipped   : ${skipped}`);
   console.log("═══════════════════════════════════════════════════════════════");
 
   if (failed > 0) {
     console.log("\n  ❌ PHASE 13 FAILED\n");
     process.exit(1);
   } else {
-    console.log(`\n  ✅ PHASE 13 PASSED (${passed}/${passed} tests)\n`);
+    console.log(`\n  ✅ PHASE 13 PASSED (${passed}/${passed + failed} tests)\n`);
     process.exit(0);
   }
 }

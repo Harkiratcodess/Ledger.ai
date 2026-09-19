@@ -7,7 +7,7 @@ const connectDatabase = require("./config/database");
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, async () => {
-  console.log(`AgentGuard backend running on http://localhost:${PORT}`);
+  console.log(`Ledger runtime listening on http://localhost:${PORT}`);
   await connectDatabase();
 
   try {

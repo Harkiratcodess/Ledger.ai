@@ -24,6 +24,27 @@ function isUserHomeDirectory(resolvedPath) {
 
 function isSystemDirectory(resolvedPath) {
   const lower = resolvedPath.toLowerCase();
+  const homedir = path.resolve(os.homedir()).toLowerCase();
+  const usersDir = path.resolve(path.dirname(homedir)).toLowerCase();
+  const appData = path.join(homedir, "appdata");
+  const local = path.join(appData, "local");
+  const roaming = path.join(appData, "roaming");
+  const localLow = path.join(appData, "locallow");
+  const tempDir = path.resolve(os.tmpdir()).toLowerCase();
+
+  const forbiddenExact = [
+    usersDir,
+    appData,
+    local,
+    roaming,
+    localLow,
+    tempDir,
+  ];
+
+  if (forbiddenExact.some((p) => lower === p)) {
+    return true;
+  }
+
   const systemPaths = [
     "c:\\windows",
     "c:\\program files",
@@ -49,21 +70,6 @@ function validateWorkspacePath(requestedPath) {
 
   const resolved = path.resolve(requestedPath.trim());
 
-  if (!fs.existsSync(resolved)) {
-    throw new Error(`Workspace path does not exist: ${resolved}`);
-  }
-
-  let stats;
-  try {
-    stats = fs.statSync(resolved);
-  } catch (err) {
-    throw new Error(`Cannot access workspace path: ${err.message}`);
-  }
-
-  if (!stats.isDirectory()) {
-    throw new Error(`Workspace path is not a directory: ${resolved}`);
-  }
-
   if (isRootDirectory(resolved)) {
     throw new Error(`Mounting root filesystem is denied: ${resolved}`);
   }
@@ -80,6 +86,21 @@ function validateWorkspacePath(requestedPath) {
     if (pattern.test(resolved)) {
       throw new Error(`Mounting sensitive directory is denied: ${resolved}`);
     }
+  }
+
+  if (!fs.existsSync(resolved)) {
+    throw new Error(`Workspace path does not exist: ${resolved}`);
+  }
+
+  let stats;
+  try {
+    stats = fs.statSync(resolved);
+  } catch (err) {
+    throw new Error(`Cannot access workspace path: ${err.message}`);
+  }
+
+  if (!stats.isDirectory()) {
+    throw new Error(`Workspace path is not a directory: ${resolved}`);
   }
 
   return resolved;

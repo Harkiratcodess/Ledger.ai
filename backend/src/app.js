@@ -35,7 +35,7 @@ app.use(express.json());
 
 app.get("/api", (_req, res) => {
   res.json({
-    name: "AgentGuard",
+    name: "Ledger",
     service: "backend",
     status: "running",
   });
@@ -73,7 +73,7 @@ app.get("/api/health", async (_req, res) => {
 
   res.json({
     status: "ok",
-    service: "agentguard-backend",
+    service: "ledger-backend",
     prerequisites: {
       docker: isDockerReady,
       mongodb: isMongoReady,
@@ -114,9 +114,14 @@ app.post("/api/sessions", async (req, res) => {
       workspace: projectPath,
     });
 
+    const image = typeof req.body?.image === "string" && req.body.image.trim()
+      ? req.body.image.trim()
+      : undefined;
+
     container = await createSandbox(projectPath, {
       command: ["sleep", "600"],
       sessionId: session.sessionId,
+      ...(image ? { image } : {}),
     });
 
     await container.start();
@@ -156,8 +161,8 @@ app.post("/api/sessions", async (req, res) => {
       clearSandboxContainer(container);
     }
 
-    console.error("Failed to create AgentGuard session:", error.message);
-    return res.status(500).json({ success: false, error: "AgentGuard session could not be started." });
+    console.error("Failed to create Ledger session:", error.message);
+    return res.status(500).json({ success: false, error: "Ledger session could not be started." });
   }
 });
 
@@ -223,7 +228,7 @@ app.post("/api/sessions/:sessionId/agent", async (req, res) => {
     const container = getTrackedSandboxContainer(session.containerId);
     const metadata = getTrackedSandboxMetadata(session.containerId);
     if (!container || metadata?.sessionId !== session.sessionId) {
-      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by AgentGuard." });
+      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by Ledger." });
     }
 
     let inspection;
@@ -303,7 +308,7 @@ app.post("/api/sessions/:sessionId/agent", async (req, res) => {
       })),
     });
   } catch (error) {
-    console.error("Failed to run AgentGuard agent plan:", error.message);
+    console.error("Failed to run Ledger agent plan:", error.message);
     return res.status(502).json({ success: false, error: "Agent plan could not be generated or executed." });
   }
 });
@@ -331,7 +336,7 @@ app.post("/api/sessions/:sessionId/execute", async (req, res) => {
     const container = getTrackedSandboxContainer(session.containerId);
     const metadata = getTrackedSandboxMetadata(session.containerId);
     if (!container || metadata?.sessionId !== session.sessionId) {
-      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by AgentGuard." });
+      return res.status(409).json({ success: false, error: "Session sandbox is not tracked by Ledger." });
     }
 
     let inspection;
@@ -378,8 +383,8 @@ app.post("/api/sessions/:sessionId/execute", async (req, res) => {
 
     return res.json({ success: true, session: updatedSession, execution });
   } catch (error) {
-    console.error("Failed to execute AgentGuard session command:", error.message);
-    return res.status(500).json({ success: false, error: "AgentGuard command execution failed." });
+    console.error("Failed to execute Ledger session command:", error.message);
+    return res.status(500).json({ success: false, error: "Ledger command execution failed." });
   }
 });
 
@@ -427,7 +432,7 @@ app.post("/api/sandbox/pause", async (_req, res) => {
   try {
     const activeSandbox = await inspectActiveSandbox();
     if (!activeSandbox) {
-      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+      return res.status(404).json({ success: false, error: "No active Ledger sandbox is available." });
     }
 
     const result = await pauseSandbox(activeSandbox.container);
@@ -441,7 +446,7 @@ app.post("/api/sandbox/pause", async (_req, res) => {
     console.error("Failed to pause active sandbox:", error.message);
     return res.status(error.statusCode === 404 ? 404 : 409).json({
       success: false,
-      error: "The active AgentGuard sandbox could not be paused.",
+      error: "The active Ledger sandbox could not be paused.",
     });
   }
 });
@@ -450,7 +455,7 @@ app.post("/api/sandbox/resume", async (_req, res) => {
   try {
     const activeSandbox = await inspectActiveSandbox();
     if (!activeSandbox) {
-      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+      return res.status(404).json({ success: false, error: "No active Ledger sandbox is available." });
     }
 
     const result = await resumeSandbox(activeSandbox.container);
@@ -464,7 +469,7 @@ app.post("/api/sandbox/resume", async (_req, res) => {
     console.error("Failed to resume active sandbox:", error.message);
     return res.status(error.statusCode === 404 ? 404 : 409).json({
       success: false,
-      error: "The active AgentGuard sandbox could not be resumed.",
+      error: "The active Ledger sandbox could not be resumed.",
     });
   }
 });
@@ -473,7 +478,7 @@ app.post("/api/sandbox/kill", async (_req, res) => {
   try {
     const activeSandbox = await inspectActiveSandbox();
     if (!activeSandbox) {
-      return res.status(404).json({ success: false, error: "No active AgentGuard sandbox is available." });
+      return res.status(404).json({ success: false, error: "No active Ledger sandbox is available." });
     }
 
     const result = await killSandbox(activeSandbox.container);
@@ -497,7 +502,7 @@ app.post("/api/sandbox/kill", async (_req, res) => {
     console.error("Failed to kill active sandbox:", error.message);
     return res.status(error.statusCode === 404 ? 404 : 409).json({
       success: false,
-      error: "The active AgentGuard sandbox could not be terminated.",
+      error: "The active Ledger sandbox could not be terminated.",
     });
   }
 });

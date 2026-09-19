@@ -1,5 +1,5 @@
 /**
- * AgentGuard MCP Path Guard
+ * Ledger MCP Path Guard
  *
  * Validates file paths used in MCP tool calls to ensure they remain
  * inside the protected /workspace boundary. Blocks traversal attacks,
@@ -45,7 +45,7 @@ function guardWorkspacePath(userPath) {
   for (const pattern of BLOCKED_PATTERNS) {
     if (pattern.test(trimmed)) {
       throw new Error(
-        `Path rejected by AgentGuard security policy. Only relative paths inside the protected workspace are allowed.`
+        `Path rejected by Ledger security policy. Only relative paths inside the protected workspace are allowed.`
       );
     }
   }
@@ -64,7 +64,7 @@ function guardWorkspacePath(userPath) {
   const basename = normalized.split("/").pop().toLowerCase();
   if (BLOCKED_NAMES.includes(basename)) {
     throw new Error(
-      `Access to '${basename}' is denied by AgentGuard security policy.`
+      `Access to '${basename}' is denied by Ledger security policy.`
     );
   }
 

@@ -1,120 +1,114 @@
 #!/usr/bin/env node
 
 const path = require("path");
-const fs = require("fs");
 const { validateWorkspacePath } = require("../src/utils/workspace-validator");
+const { loadProjectConfig, initProjectConfig } = require("../src/cli/config");
+const { DEFAULT_BACKEND_URL, ensureRuntime, pingHealth } = require("../src/cli/runtime");
 const packageInfo = require("../package.json");
 
-const DEFAULT_BACKEND_URL = process.env.AGENTGUARD_API_URL || "http://localhost:5000";
+function invokedName() {
+  const base = path.basename(process.argv[1] || "ledger", ".js").toLowerCase();
+  if (base.includes("agentguard") && !base.includes("ledger")) return "agentguard";
+  return "ledger";
+}
 
 function printHelp() {
-  const isLedger = process.argv[1] && path.basename(process.argv[1], ".js").toLowerCase().includes("ledger");
-  const bin = isLedger ? "ledger" : "agentguard";
+  const bin = invokedName();
   console.log(`
-Ledger CLI — powered by AgentGuard Protected Security Runtime (v${packageInfo.version})
+Ledger CLI — AI agent security runtime (v${packageInfo.version})
 
 USAGE:
-  agentguard protect <workspace> [options]
-  agentguard start <workspace> [options]
-  agentguard exec <command...>
-  agentguard status [options]
-  agentguard pause
-  agentguard resume
-  agentguard kill
-  agentguard version
+  ${bin} init
+  ${bin} protect <workspace> [options]
+  ${bin} exec <command...>
+  ${bin} status [options]
+  ${bin} pause
+  ${bin} resume
+  ${bin} kill
+  ${bin} mcp
+  ${bin} version
 
 COMMANDS:
-  protect, start    Start a protected execution environment for the given workspace.
-  exec              Execute a command inside the active AgentGuard sandbox.
-  status            Display the status and policy details of the active sandbox.
+  init              Create a minimal .ledger/config.json in the current directory.
+  protect, start    Validate the workspace and start a protected sandbox runtime.
+  exec              Execute a command inside the active protected sandbox.
+  status            Display the status of the active sandbox.
   pause             Pause the active sandbox container.
   resume            Resume a paused sandbox container.
   kill              Terminate and remove the active sandbox container.
-  version           Display the AgentGuard CLI version.
+  mcp               Start the Ledger MCP security gateway over STDIO.
+  version           Display the CLI version.
 
 OPTIONS:
   --exec <cmd>      Run a command inside the sandbox immediately after creation.
-  --url <url>       AgentGuard backend API URL (default: ${DEFAULT_BACKEND_URL}).
+  --url <url>       Backend API URL (default: ${DEFAULT_BACKEND_URL}).
   --detach          Start the protected sandbox in the background and exit immediately.
   --json            Output machine-readable JSON (applicable to 'status').
-  -v, --version     Show AgentGuard version.
+  -v, --version     Show version.
   -h, --help        Show this help message.
 
 EXAMPLES:
-  agentguard protect ./my-project
-  agentguard protect ./my-project --detach
-  agentguard protect ./my-project --exec "npm test"
-  agentguard exec "ls -la /workspace"
-  agentguard status
-  agentguard kill
+  ${bin} init
+  ${bin} protect .
+  ${bin} protect ./my-project --detach
+  ${bin} exec npm test
+  ${bin} mcp
+  ${bin} kill
+
+The dashboard is optional. Protection does not require the React UI.
 `);
 }
 
-async function checkPrerequisites(apiUrl) {
-  try {
-    const res = await fetch(`${apiUrl}/api/health`, { signal: AbortSignal.timeout(3000) });
-    if (!res.ok) {
-      return { ok: false, reason: "backend_error", message: `Backend responded with HTTP ${res.status}` };
-    }
-    const data = await res.json();
-    if (data?.prerequisites) {
-      if (data.prerequisites.docker === false) {
-        return { ok: false, reason: "docker_down", message: "Docker is not running.\nStart Docker Desktop and retry." };
-      }
-      if (data.prerequisites.mongodb === false) {
-        return { ok: false, reason: "mongo_down", message: "MongoDB is unavailable.\nConfigure MONGODB_URI or start MongoDB." };
-      }
-    }
-    return { ok: true, data };
-  } catch (err) {
-    return {
-      ok: false,
-      reason: "backend_unreachable",
-      message: `Cannot connect to AgentGuard backend at ${apiUrl}.\nEnsure the AgentGuard backend service is running ('npm start' or 'node src/server.js').`,
-    };
-  }
+async function checkPrerequisites(apiUrl, { autoStart = true } = {}) {
+  const health = autoStart ? await ensureRuntime(apiUrl) : await pingHealth(apiUrl);
+  return health;
 }
 
 async function protectWorkspace(workspaceArg, options = {}) {
   const apiUrl = options.url || DEFAULT_BACKEND_URL;
+  const projectConfig = loadProjectConfig(process.cwd());
 
   let validatedWorkspace;
   try {
     validatedWorkspace = validateWorkspacePath(workspaceArg);
   } catch (err) {
-    console.error(`\x1b[31m[AgentGuard Error]\x1b[0m ${err.message}`);
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m ${err.message}`);
     process.exit(1);
   }
 
   const prereq = await checkPrerequisites(apiUrl);
   if (!prereq.ok) {
-    console.error(`\x1b[31m[AgentGuard Error]\x1b[0m ${prereq.message}`);
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m ${prereq.message}`);
     process.exit(1);
   }
+
+  const payload = {
+    workspace: validatedWorkspace,
+    ...(projectConfig.sandboxImage ? { image: projectConfig.sandboxImage } : {}),
+  };
 
   let sessionRes;
   try {
     sessionRes = await fetch(`${apiUrl}/api/sessions`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ workspace: validatedWorkspace }),
+      body: JSON.stringify(payload),
     });
   } catch (err) {
-    console.error(`\x1b[31m[AgentGuard Error]\x1b[0m Failed to request session creation: ${err.message}`);
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m Failed to request session creation: ${err.message}`);
     process.exit(1);
   }
 
   const sessionData = await sessionRes.json();
   if (!sessionRes.ok || !sessionData.success) {
-    console.error(`\x1b[31m[AgentGuard Error]\x1b[0m Session creation failed: ${sessionData.error || "Unknown error"}`);
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m Session creation failed: ${sessionData.error || "Unknown error"}`);
     process.exit(1);
   }
 
   const session = sessionData.session;
   const containerShortId = session.containerId ? session.containerId.slice(0, 12) : "unknown";
 
-  // Clean user-facing output as specified in product requirements
-  console.log(`AgentGuard protected runtime started\n`);
+  console.log(`Ledger — protected runtime started\n`);
   console.log(`Workspace: ${session.workspace}`);
   console.log(`Session: ${session.sessionId}`);
   console.log(`Container: ${containerShortId}`);
@@ -132,7 +126,8 @@ async function protectWorkspace(workspaceArg, options = {}) {
   }
 
   if (options.detach) {
-    console.log(`Protected sandbox running in background. Use 'agentguard kill' to terminate.`);
+    const bin = invokedName();
+    console.log(`Protected sandbox running in background. Use '${bin} kill' to terminate.`);
     return;
   }
 
@@ -143,12 +138,12 @@ async function protectWorkspace(workspaceArg, options = {}) {
   async function cleanup() {
     if (isCleaningUp) return;
     isCleaningUp = true;
-    console.log(`\n[AgentGuard] Stopping protected runtime...`);
+    console.log(`\n[Ledger] Stopping protected runtime...`);
     try {
       await fetch(`${apiUrl}/api/sandbox/kill`, { method: "POST" });
-      console.log(`[AgentGuard] Sandbox cleaned up successfully.`);
+      console.log(`[Ledger] Sandbox cleaned up successfully.`);
     } catch (err) {
-      console.error(`[AgentGuard] Cleanup error: ${err.message}`);
+      console.error(`[Ledger] Cleanup error: ${err.message}`);
     }
     process.exit(0);
   }
@@ -157,22 +152,21 @@ async function protectWorkspace(workspaceArg, options = {}) {
   process.on("SIGTERM", cleanup);
   process.on("SIGHUP", cleanup);
 
-  // Monitor sandbox status for enforcement pause notifications
   const monitorInterval = setInterval(async () => {
     try {
       const statusRes = await fetch(`${apiUrl}/api/sandbox/status`);
       const statusData = await statusRes.json();
       if (statusData.paused) {
-        console.log(`\n\x1b[41m\x1b[37m[SECURITY ALERT]\x1b[0m Sandbox was PAUSED by AgentGuard risk engine!`);
-        console.log(`An event exceeded the security threshold. Container is safely frozen.`);
-        console.log(`Inspect events with dashboard or use 'agentguard resume' / 'agentguard kill'.\n`);
+        console.log(`\n\x1b[41m\x1b[37m[SECURITY ALERT]\x1b[0m Sandbox was PAUSED by the risk engine.`);
+        console.log(`An event exceeded the security threshold. Container is frozen.`);
+        console.log(`Inspect events in the optional dashboard or use '${invokedName()} resume' / '${invokedName()} kill'.\n`);
       }
       if (!statusData.active) {
-        console.log(`\n[AgentGuard] Sandbox container is no longer active.`);
+        console.log(`\n[Ledger] Sandbox container is no longer active.`);
         clearInterval(monitorInterval);
         process.exit(0);
       }
-    } catch (err) {
+    } catch {
       // Ignore transient errors
     }
   }, 2000);
@@ -185,8 +179,14 @@ async function executeCommand(sessionId, cmdStr, apiUrl = DEFAULT_BACKEND_URL) {
   } else if (typeof cmdStr === "string") {
     command = ["sh", "-lc", cmdStr];
   } else {
-    console.error(`[AgentGuard Error] Invalid command`);
+    console.error(`[Ledger Error] Invalid command`);
     return { exitCode: 1 };
+  }
+
+  const prereq = await checkPrerequisites(apiUrl);
+  if (!prereq.ok) {
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m ${prereq.message}`);
+    process.exit(1);
   }
 
   let targetSessionId = sessionId;
@@ -194,7 +194,7 @@ async function executeCommand(sessionId, cmdStr, apiUrl = DEFAULT_BACKEND_URL) {
     const statusRes = await fetch(`${apiUrl}/api/sandbox/status`);
     const status = await statusRes.json();
     if (!status.active || !status.sessionId) {
-      console.error(`\x1b[31m[AgentGuard Error]\x1b[0m No active sandbox session found.\nStart one with: agentguard protect <workspace>`);
+      console.error(`\x1b[31m[Ledger Error]\x1b[0m No active sandbox session found.\nStart one with: ${invokedName()} protect <workspace>`);
       process.exit(1);
     }
     targetSessionId = status.sessionId;
@@ -209,7 +209,7 @@ async function executeCommand(sessionId, cmdStr, apiUrl = DEFAULT_BACKEND_URL) {
 
     const data = await res.json();
     if (!res.ok || !data.success) {
-      console.error(`\x1b[31m[Execution Failed]\x1b[0m ${data.error || "Unknown error"}`);
+      console.error(`\x1b[31m[Ledger] Execution failed:\x1b[0m ${data.error || "Unknown error"}`);
       process.exit(1);
     }
 
@@ -221,7 +221,7 @@ async function executeCommand(sessionId, cmdStr, apiUrl = DEFAULT_BACKEND_URL) {
     }
     return data.execution;
   } catch (err) {
-    console.error(`\x1b[31m[AgentGuard Error]\x1b[0m Execution error: ${err.message}`);
+    console.error(`\x1b[31m[Ledger Error]\x1b[0m Execution error: ${err.message}`);
     process.exit(1);
   }
 }
@@ -229,6 +229,13 @@ async function executeCommand(sessionId, cmdStr, apiUrl = DEFAULT_BACKEND_URL) {
 async function showStatus(options = {}) {
   const apiUrl = options.url || DEFAULT_BACKEND_URL;
   try {
+    const prereq = await checkPrerequisites(apiUrl);
+    if (!prereq.ok && prereq.reason === "backend_unreachable") {
+      console.error(`[Ledger Error] Failed to connect to backend: ${prereq.error?.message || prereq.message}`);
+      console.error(`Ensure backend is running at ${apiUrl}`);
+      process.exit(1);
+    }
+
     const res = await fetch(`${apiUrl}/api/sandbox/status`);
     const data = await res.json();
 
@@ -240,7 +247,7 @@ async function showStatus(options = {}) {
     if (!data.active) {
       console.log(`\nAgentGuard Status: INACTIVE\n`);
       console.log(`  No protected sandbox is currently running.`);
-      console.log(`  Start one with: agentguard protect <workspace>\n`);
+      console.log(`  Start one with: ${invokedName()} protect <workspace>\n`);
       return;
     }
 
@@ -258,67 +265,97 @@ async function showStatus(options = {}) {
 
     if (data.paused) {
       console.log(`\n  \x1b[33mNotice: Container is paused due to security policy enforcement.\x1b[0m`);
-      console.log(`  Resume: agentguard resume`);
-      console.log(`  Tear down: agentguard kill\n`);
+      console.log(`  Resume: ${invokedName()} resume`);
+      console.log(`  Tear down: ${invokedName()} kill\n`);
     } else {
-      console.log(`\n  Use 'agentguard exec <command...>' to run commands in the sandbox.`);
-      console.log(`  Use 'agentguard kill' to tear down the environment.\n`);
+      console.log(`\n  Use '${invokedName()} exec <command...>' to run commands in the sandbox.`);
+      console.log(`  Use '${invokedName()} kill' to tear down the environment.\n`);
     }
   } catch (err) {
-    console.error(`[AgentGuard Error] Failed to connect to backend: ${err.message}`);
+    console.error(`[Ledger Error] Failed to connect to backend: ${err.message}`);
     console.error(`Ensure backend is running at ${apiUrl}`);
     process.exit(1);
   }
 }
 
 async function pauseSandbox(apiUrl = DEFAULT_BACKEND_URL) {
+  const prereq = await checkPrerequisites(apiUrl);
+  if (!prereq.ok) {
+    console.error(`[Ledger Error] ${prereq.message}`);
+    process.exit(1);
+  }
   try {
     const res = await fetch(`${apiUrl}/api/sandbox/pause`, { method: "POST" });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      console.error(`[AgentGuard Error] ${data.error || "Failed to pause"}`);
+      console.error(`[Ledger Error] ${data.error || "Failed to pause"}`);
       process.exit(1);
     }
-    console.log(`[AgentGuard] Sandbox container paused.`);
+    console.log(`[Ledger] Sandbox container paused.`);
   } catch (err) {
-    console.error(`[AgentGuard Error] Failed to pause: ${err.message}`);
+    console.error(`[Ledger Error] Failed to pause: ${err.message}`);
     process.exit(1);
   }
 }
 
 async function resumeSandbox(apiUrl = DEFAULT_BACKEND_URL) {
+  const prereq = await checkPrerequisites(apiUrl);
+  if (!prereq.ok) {
+    console.error(`[Ledger Error] ${prereq.message}`);
+    process.exit(1);
+  }
   try {
     const res = await fetch(`${apiUrl}/api/sandbox/resume`, { method: "POST" });
     const data = await res.json();
     if (!res.ok || !data.success) {
-      console.error(`[AgentGuard Error] ${data.error || "Failed to resume"}`);
+      console.error(`[Ledger Error] ${data.error || "Failed to resume"}`);
       process.exit(1);
     }
-    console.log(`[AgentGuard] Sandbox container resumed.`);
+    console.log(`[Ledger] Sandbox container resumed.`);
   } catch (err) {
-    console.error(`[AgentGuard Error] Failed to resume: ${err.message}`);
+    console.error(`[Ledger Error] Failed to resume: ${err.message}`);
     process.exit(1);
   }
 }
 
 async function killSandbox(apiUrl = DEFAULT_BACKEND_URL, options = {}) {
+  const prereq = await checkPrerequisites(apiUrl);
+  if (!prereq.ok && !options.silent) {
+    console.error(`[Ledger Error] ${prereq.message}`);
+    process.exit(1);
+  }
   try {
     const res = await fetch(`${apiUrl}/api/sandbox/kill`, { method: "POST" });
     const data = await res.json();
     if (!options.silent) {
       if (!res.ok || !data.success) {
-        console.log(`[AgentGuard] ${data.error || "No active sandbox to terminate."}`);
+        console.log(`[Ledger] ${data.error || "No active sandbox to terminate."}`);
       } else {
-        console.log(`[AgentGuard] Sandbox container killed and cleaned up.`);
+        console.log(`[Ledger] Sandbox container killed and cleaned up.`);
       }
     }
     return data;
   } catch (err) {
     if (!options.silent) {
-      console.error(`[AgentGuard Error] Failed to kill sandbox: ${err.message}`);
+      console.error(`[Ledger Error] Failed to kill sandbox: ${err.message}`);
     }
     process.exit(1);
   }
+}
+
+function runInit() {
+  const result = initProjectConfig(process.cwd());
+  if (result.created) {
+    console.log(`Initialized Ledger workspace config:\n  ${result.path}`);
+    console.log(`Edit this file to set sandbox image, network destinations, and enforcement.`);
+  } else {
+    console.log(`Ledger already initialized:\n  ${result.path}`);
+  }
+}
+
+function runMcp() {
+  const { startServer } = require("../src/mcp/server");
+  startServer();
 }
 
 async function main() {
@@ -330,7 +367,7 @@ async function main() {
   }
 
   if (args.includes("-v") || args.includes("--version") || args[0] === "version") {
-    console.log(`agentguard v${packageInfo.version}`);
+    console.log(`${invokedName()} v${packageInfo.version}`);
     process.exit(0);
   }
 
@@ -343,11 +380,15 @@ async function main() {
 
   const url = getOption("--url") || DEFAULT_BACKEND_URL;
 
-  if (command === "protect" || command === "start") {
+  if (command === "init") {
+    runInit();
+  } else if (command === "mcp") {
+    runMcp();
+  } else if (command === "protect" || command === "start") {
     const workspace = args[1];
     if (!workspace || workspace.startsWith("-")) {
-      console.error(`\x1b[31m[AgentGuard Error]\x1b[0m Missing workspace path.`);
-      console.error(`Usage: agentguard protect <workspace> [options]`);
+      console.error(`\x1b[31m[Ledger Error]\x1b[0m Missing workspace path.`);
+      console.error(`Usage: ${invokedName()} protect <workspace> [options]`);
       process.exit(1);
     }
 
@@ -359,10 +400,10 @@ async function main() {
 
     await protectWorkspace(workspace, options);
   } else if (command === "exec") {
-    const cmdArgs = args.slice(1).filter((a) => !a.startsWith("--url"));
+    const cmdArgs = args.slice(1).filter((a) => a !== "--url" && a !== url);
     if (cmdArgs.length === 0) {
-      console.error(`[AgentGuard Error] Missing command to execute.`);
-      console.error(`Usage: agentguard exec <command...>`);
+      console.error(`[Ledger Error] Missing command to execute.`);
+      console.error(`Usage: ${invokedName()} exec <command...>`);
       process.exit(1);
     }
     const fullCmd = cmdArgs.join(" ");
@@ -383,6 +424,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error("[AgentGuard Fatal Error]:", err);
+  console.error("[Ledger Fatal Error]:", err);
   process.exit(1);
 });

@@ -32,7 +32,7 @@ async function createSandbox(projectPath, options = {}) {
     `https_proxy=${proxyUrl}`,
   ];
 
-  const image = process.env.AGENTGUARD_SANDBOX_IMAGE || "node:20-slim";
+  const image = options.image || process.env.AGENTGUARD_SANDBOX_IMAGE || "node:20-slim";
 
   const container = await docker.createContainer({
     Image: image,

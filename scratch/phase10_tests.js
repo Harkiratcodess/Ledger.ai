@@ -91,7 +91,7 @@ async function run() {
   console.log("\n── 5. PROTECT WORKSPACE (OUTPUT & STARTUP) ───────────");
   const protectRes = runCli(["protect", DEMO_WORKSPACE, "--detach"]);
   record("T10 Protect command exits 0", protectRes.code === 0, `code=${protectRes.code}`);
-  record("T11 Protect output header matches spec", protectRes.output.includes("AgentGuard protected runtime started"));
+  record("T11 Protect output header matches spec", protectRes.output.includes("protected runtime started"));
   record("T12 Protect output contains Workspace:", protectRes.output.includes("Workspace:"));
   record("T13 Protect output contains Session:", protectRes.output.includes("Session:"));
   record("T14 Protect output contains Container:", protectRes.output.includes("Container:"));
@@ -212,8 +212,8 @@ async function run() {
   record("T44 Root README.md exists", readmeExists);
 
   const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, "backend/package.json"), "utf8"));
-  record("T45 Package name is agentguard", pkg.name === "agentguard", pkg.name);
-  record("T46 Bin correctly exposes agentguard", pkg.bin?.agentguard === "./bin/agentguard.js");
+  record("T45 Package name is publishable", pkg.name === "ledger-security" || pkg.name === "agentguard", pkg.name);
+  record("T46 Bin correctly exposes ledger and agentguard", pkg.bin?.ledger === "./bin/agentguard.js" && pkg.bin?.agentguard === "./bin/agentguard.js");
   record("T47 Private flag removed for publishability", pkg.private === undefined || pkg.private === false);
 
   // Summary

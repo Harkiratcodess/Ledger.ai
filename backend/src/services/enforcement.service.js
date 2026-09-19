@@ -9,7 +9,7 @@ function registerSandboxContainer(container, metadata = {}) {
   const normalizedMetadata = {
     ...metadata,
     trackedAt: new Date(),
-    createdBy: "agentguard",
+    createdBy: "ledger",
   };
 
   ACTIVE_SANDBOX_CONTAINERS.set(container.id, {
@@ -18,6 +18,7 @@ function registerSandboxContainer(container, metadata = {}) {
   });
 
   ACTIVE_SANDBOX_CONTAINER_ID = container.id;
+  container.__ledgerTracked = true;
   container.__agentguardTracked = true;
 
   return container;
@@ -110,7 +111,7 @@ function clearSandboxContainer(container) {
 
 async function pauseSandbox(container) {
   if (!isTrackedSandboxContainer(container)) {
-    throw new Error("Pause denied: container is not tracked by AgentGuard.");
+    throw new Error("Pause denied: container is not tracked by Ledger.");
   }
 
   const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;
@@ -137,7 +138,7 @@ async function pauseSandbox(container) {
 
 async function resumeSandbox(container) {
   if (!isTrackedSandboxContainer(container)) {
-    throw new Error("Resume denied: container is not tracked by AgentGuard.");
+    throw new Error("Resume denied: container is not tracked by Ledger.");
   }
 
   const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;
@@ -177,12 +178,12 @@ async function killSandbox(container) {
   }
 
   if (!isTrackedSandboxContainer(container)) {
-    throw new Error("Kill denied: container is not tracked by AgentGuard.");
+    throw new Error("Kill denied: container is not tracked by Ledger.");
   }
 
   const activeSandbox = getActiveSandboxContainer();
   if (activeSandbox && activeSandbox.id !== container.id) {
-    throw new Error("Kill denied: container does not belong to the active AgentGuard sandbox.");
+    throw new Error("Kill denied: container does not belong to the active Ledger sandbox.");
   }
 
   const trackedContainer = ACTIVE_SANDBOX_CONTAINERS.get(container.id)?.container || container;

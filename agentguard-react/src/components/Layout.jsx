@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { NavLink } from "react-router-dom";
 
 const PRIMARY_NAV = [
@@ -18,6 +18,26 @@ const INACTIVE_CLASSES =
 
 export default function Layout({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [runtime, setRuntime] = useState({ connected: false, docker: false });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch("http://localhost:5000/api/health")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((payload) => {
+        if (cancelled || !payload) return;
+        setRuntime({
+          connected: payload.status === "ok",
+          docker: Boolean(payload?.prerequisites?.docker),
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setRuntime({ connected: false, docker: false });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   function closeSidebar() {
     setSidebarOpen(false);
@@ -47,12 +67,19 @@ export default function Layout({ children }) {
         </div>
         <div className="flex items-center gap-space-sm lg:gap-space-lg shrink-0">
           <div className="hidden md:block border border-surface-container-highest px-space-sm py-space-xs font-label-sm text-label-sm text-on-surface-variant uppercase">
-            LOCAL ONLY
+            ZERO TELEMETRY
           </div>
           <div className="flex items-center gap-space-sm border border-surface-container-highest px-space-sm py-space-xs">
-            <span className="w-2 h-2 bg-primary-container animate-pulse-fast inline-block" aria-hidden="true" />
-            <span className="font-label-sm text-label-sm uppercase text-primary-container tracking-wider font-bold">
-              MONITORING ACTIVE
+            <span
+              className={`w-2 h-2 inline-block ${runtime.connected ? "bg-primary-container animate-pulse-fast" : "bg-outline"}`}
+              aria-hidden="true"
+            />
+            <span className={`font-label-sm text-label-sm uppercase tracking-wider font-bold ${runtime.connected ? "text-primary-container" : "text-outline"}`}>
+              {runtime.connected
+                ? runtime.docker
+                  ? "RUNTIME CONNECTED"
+                  : "RUNTIME CONNECTED / DOCKER DOWN"
+                : "RUNTIME DISCONNECTED"}
             </span>
           </div>
         </div>

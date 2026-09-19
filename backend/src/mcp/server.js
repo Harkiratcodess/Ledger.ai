@@ -1,12 +1,12 @@
 /**
- * AgentGuard MCP Gateway Server
+ * Ledger MCP Gateway Server
  *
  * Implements the MCP (Model Context Protocol) JSON-RPC 2.0 wire protocol
  * over STDIO transport. Exposes protected tools that route through the
- * AgentGuard backend REST API and existing Docker sandbox runtime.
+ * Ledger backend REST API and existing Docker sandbox runtime.
  *
  * NO AI logic, NO risk engine logic, NO duplicate enforcement.
- * The existing AgentGuard backend remains the source of truth.
+ * The existing Ledger backend remains the source of truth.
  */
 
 const {
@@ -27,7 +27,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "protected_execute",
     description:
-      "Execute a shell command inside the AgentGuard protected Docker sandbox. " +
+      "Execute a shell command inside the Ledger protected Docker sandbox. " +
       "The command runs inside the managed container — NOT on the host. " +
       "Filesystem changes trigger monitoring and risk evaluation. " +
       "If the sandbox is paused due to a HIGH-risk event, this tool returns an error.",
@@ -48,7 +48,7 @@ const TOOL_DEFINITIONS = [
   {
     name: "protected_read_file",
     description:
-      "Read a file from the protected workspace inside the AgentGuard sandbox. " +
+      "Read a file from the protected workspace inside the Ledger sandbox. " +
       "Path must be relative (e.g. 'src/main.js'). " +
       "Absolute paths, parent traversal (../), .ssh, .aws, and credential stores are blocked.",
     inputSchema: {
@@ -87,11 +87,11 @@ const TOOL_DEFINITIONS = [
   {
     name: "protected_network_request",
     description:
-      "Make an HTTP/HTTPS request from inside the AgentGuard protected sandbox. " +
+      "Make an HTTP/HTTPS request from inside the Ledger protected sandbox. " +
       "The request routes through the existing mitmproxy interception pipeline. " +
       "Network metadata (hostname, method, status code) is captured and evaluated by the risk engine. " +
       "Response body is NOT returned (metadata-only policy). " +
-      "Only operations routed through this tool are protected by AgentGuard.",
+      "Only operations routed through this tool are protected by Ledger.",
     inputSchema: {
       type: "object",
       properties: {
@@ -176,7 +176,7 @@ async function handleRequest(req) {
     const toolName = params?.name;
     const toolArgs = params?.arguments || {};
 
-    sendLog("info", `AgentGuard MCP: tool call '${toolName}'`);
+    sendLog("info", `Ledger MCP: tool call '${toolName}'`);
 
     try {
       let result;
@@ -247,27 +247,27 @@ async function handleRequest(req) {
 
 function startServer() {
   process.stderr.write(
-    `[AgentGuard MCP] Gateway starting on STDIO (backend: ${API_URL})\n`
+    `[Ledger MCP] Gateway starting on STDIO (backend: ${API_URL})\n`
   );
 
   const sessionId = process.env.AGENTGUARD_SESSION_ID;
   if (sessionId) {
     process.stderr.write(
-      `[AgentGuard MCP] Pinned to session: ${sessionId}\n`
+      `[Ledger MCP] Pinned to session: ${sessionId}\n`
     );
   } else {
     process.stderr.write(
-      `[AgentGuard MCP] No AGENTGUARD_SESSION_ID set — will use active sandbox session.\n`
+      `[Ledger MCP] No AGENTGUARD_SESSION_ID set — will use active sandbox session.\n`
     );
   }
 
   // Verify backend connectivity at startup (non-blocking)
   requireSession(API_URL)
     .then(({ sessionId: sid }) => {
-      process.stderr.write(`[AgentGuard MCP] Connected to session: ${sid}\n`);
+      process.stderr.write(`[Ledger MCP] Connected to session: ${sid}\n`);
     })
     .catch((err) => {
-      process.stderr.write(`[AgentGuard MCP] Warning: ${err.message}\n`);
+      process.stderr.write(`[Ledger MCP] Warning: ${err.message}\n`);
     });
 
   let buffer = "";
@@ -289,24 +289,24 @@ function startServer() {
         continue;
       }
       handleRequest(req).catch((err) => {
-        process.stderr.write(`[AgentGuard MCP] Unhandled error: ${err.message}\n`);
+        process.stderr.write(`[Ledger MCP] Unhandled error: ${err.message}\n`);
         sendError(req?.id ?? null, -32603, "Internal error", err.message);
       });
     }
   });
 
   process.stdin.on("end", () => {
-    process.stderr.write("[AgentGuard MCP] Client disconnected. Gateway exiting.\n");
+    process.stderr.write("[Ledger MCP] Client disconnected. Gateway exiting.\n");
     process.exit(0);
   });
 
   process.on("SIGINT", () => {
-    process.stderr.write("[AgentGuard MCP] Received SIGINT. Exiting.\n");
+    process.stderr.write("[Ledger MCP] Received SIGINT. Exiting.\n");
     process.exit(0);
   });
 
   process.on("SIGTERM", () => {
-    process.stderr.write("[AgentGuard MCP] Received SIGTERM. Exiting.\n");
+    process.stderr.write("[Ledger MCP] Received SIGTERM. Exiting.\n");
     process.exit(0);
   });
 }

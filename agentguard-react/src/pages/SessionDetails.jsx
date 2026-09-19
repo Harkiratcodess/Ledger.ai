@@ -82,7 +82,7 @@ export default function SessionDetails() {
         <div className="p-space-xl">
           <ErrorState
             title="SESSION NOT FOUND"
-            message={`No mock session exists for id "${id}".`}
+            message={`No session exists for id "${id}". Start the runtime and protect a workspace first.`}
             onRetry={() => navigate("/sessions")}
           />
         </div>
@@ -105,27 +105,43 @@ export default function SessionDetails() {
               </span>
             </div>
             <p className="font-label-sm text-label-sm text-on-surface-variant uppercase tracking-wider mt-space-xs">
-              Mock session inspection — no live runtime attached
+              {apiSession ? "Live session from the local Ledger runtime" : "Session record not loaded from runtime"}
             </p>
           </div>
           <div className="flex items-center flex-wrap gap-space-sm">
             <button
               type="button"
-              onClick={() => setToast("PAUSE SESSION (MOCK)")}
+              onClick={async () => {
+                try {
+                  const response = await fetch("http://localhost:5000/api/sandbox/pause", { method: "POST" });
+                  const payload = await response.json();
+                  setToast(payload?.success ? "SANDBOX PAUSED" : payload?.error || "PAUSE FAILED");
+                } catch (err) {
+                  setToast(err.message);
+                }
+              }}
               className="h-9 px-space-md bg-surface border border-surface-container-highest text-on-surface font-label-md text-label-md hover:border-outline focus:outline-none focus:ring-1 focus:ring-primary-container"
             >
-              PAUSE SESSION (MOCK)
+              PAUSE SESSION
             </button>
             <button
               type="button"
-              onClick={() => setToast("TERMINATE SESSION (MOCK)")}
+              onClick={async () => {
+                try {
+                  const response = await fetch("http://localhost:5000/api/sandbox/kill", { method: "POST" });
+                  const payload = await response.json();
+                  setToast(payload?.success ? "SANDBOX TERMINATED" : payload?.error || "KILL FAILED");
+                } catch (err) {
+                  setToast(err.message);
+                }
+              }}
               className="h-9 px-space-md border border-error-container text-error font-label-md text-label-md hover:bg-error-container hover:text-on-error focus:outline-none focus:ring-1 focus:ring-error"
             >
-              TERMINATE SESSION (MOCK)
+              TERMINATE SESSION
             </button>
             <button
               type="button"
-              onClick={() => setToast("EXPORT GENERATED (MOCK)")}
+              onClick={() => setToast("Session JSON is available from GET /api/sessions/:id")}
               className="h-9 px-space-md bg-primary-container text-on-primary font-label-md text-label-md font-bold focus:outline-none focus:ring-1 focus:ring-primary"
             >
               EXPORT SESSION JSON

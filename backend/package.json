@@ -1,13 +1,38 @@
 {
-  "name": "agentguard",
+  "name": "ledger-security",
   "version": "0.1.0",
-  "description": "AgentGuard: Security middleware and protected runtime for AI agents",
+  "description": "Ledger: local security runtime and MCP gateway for AI coding agents",
+  "keywords": [
+    "ledger",
+    "security",
+    "ai-agents",
+    "mcp",
+    "sandbox",
+    "docker"
+  ],
+  "license": "MIT",
+  "author": "Ledger Security",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Harkiratcodess/Ledger.ai"
+  },
   "main": "src/server.js",
   "bin": {
     "ledger": "./bin/agentguard.js",
     "agentguard": "./bin/agentguard.js",
     "ledger-mcp": "./bin/agentguard-mcp.js",
     "agentguard-mcp": "./bin/agentguard-mcp.js"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "!src/**/__pycache__/**",
+    "!src/**/*.pyc",
+    ".env.example",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=18"
   },
   "scripts": {
     "dev": "nodemon src/server.js",

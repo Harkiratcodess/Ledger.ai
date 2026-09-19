@@ -59,7 +59,7 @@ async function requireSession(apiUrl) {
     healthData = data;
   } catch (err) {
     throw new Error(
-      "AgentGuard backend is not reachable. " +
+      "Ledger backend is not reachable. " +
       `Ensure it is running at ${apiUrl} (npm start in backend/).`
     );
   }
@@ -79,8 +79,8 @@ async function requireSession(apiUrl) {
   const sessionId = await resolveSession(apiUrl);
   if (!sessionId) {
     throw new Error(
-      "No active AgentGuard session found. " +
-      "Start a protected sandbox first: agentguard protect <workspace>"
+      "No active Ledger session found. " +
+      "Start a protected sandbox first: ledger protect <workspace>"
     );
   }
 
@@ -124,14 +124,14 @@ async function protectedExecute(apiUrl, args) {
     const msg = data?.error || "Sandbox unavailable.";
     if (msg.toLowerCase().includes("paused")) {
       throw new Error(
-        "Protected session is PAUSED by AgentGuard enforcement. " +
-        "Review events and use 'agentguard resume' to continue."
+        "Protected session is PAUSED by Ledger enforcement. " +
+        "Review events and use 'ledger resume' to continue."
       );
     }
     if (msg.toLowerCase().includes("killed") || msg.toLowerCase().includes("completed") || msg.toLowerCase().includes("state")) {
       throw new Error(
         "Protected session has ended. " +
-        "Start a new session with: agentguard protect <workspace>"
+        "Start a new session with: ledger protect <workspace>"
       );
     }
     throw new Error(`Sandbox rejected execution: ${msg}`);
@@ -288,7 +288,7 @@ req.end();
     statusCode,
     url,
     method: safeMethod,
-    note: "Response body is not captured by AgentGuard policy (metadata only).",
+    note: "Response body is not captured by Ledger policy (metadata only).",
   };
 }
 

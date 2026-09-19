@@ -1,19 +1,20 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import Layout from "../components/Layout";
 import LoadingState from "../components/LoadingState";
 
 const PRESETS = ["node:20-slim", "python:3.11-slim", "rust:1.75-bookworm", "ubuntu:22.04"];
+const API = "http://localhost:5000";
 
-/** UI-only sandbox lifecycle. Does not start Docker or call an API. */
 export default function SandboxSetup() {
-  const [projectPath, setProjectPath] = useState("/Users/dev/projects/demo-app");
+  const [projectPath, setProjectPath] = useState("");
   const [image, setImage] = useState("node:20-slim");
-  const [sessionName, setSessionName] = useState("demo-session");
+  const [sessionName, setSessionName] = useState("protected-session");
   const [status, setStatus] = useState("IDLE");
+  const [sessionMeta, setSessionMeta] = useState(null);
   const [consoleLines, setConsoleLines] = useState([
-    "[00:00.01] INIT LEDGER PROTECTED RUNTIME",
-    "[00:00.02] MOCK PROVISIONING CONSOLE READY",
-    "[00:00.04] AWAITING START SANDBOX (UI SIMULATION)",
+    "[00:00.01] LEDGER PROTECTED RUNTIME CONSOLE",
+    "[00:00.02] Dashboard is optional observability. CLI: ledger protect <workspace>",
+    "[00:00.04] Awaiting workspace path and START SANDBOX",
   ]);
   const [policies, setPolicies] = useState({
     deletions: true,
@@ -21,33 +22,54 @@ export default function SandboxSetup() {
     buffer: true,
   });
 
-  useEffect(() => {
-    if (status !== "INITIALIZING") return undefined;
-    const t = setTimeout(() => {
-      setStatus("ACTIVE");
-      setConsoleLines((prev) => [
-        ...prev,
-        "[00:01.20] UI SIM: CONTAINER LABEL ASSIGNED",
-        "[00:01.40] UI SIM: WATCHER STATE → READY",
-        "[00:01.55] SANDBOX ACTIVE (MOCK)",
-      ]);
-    }, 1600);
-    return () => clearTimeout(t);
-  }, [status]);
-
-  function handleStart() {
+  async function handleStart() {
     if (status === "INITIALIZING") return;
     if (status === "ACTIVE") {
       setStatus("IDLE");
-      setConsoleLines((prev) => [...prev, "[--:--.--] SANDBOX STOPPED (UI SIMULATION)"]);
+      setSessionMeta(null);
+      try {
+        await fetch(`${API}/api/sandbox/kill`, { method: "POST" });
+        setConsoleLines((prev) => [...prev, "[--:--.--] Sandbox kill requested"]);
+      } catch (err) {
+        setConsoleLines((prev) => [...prev, `[--:--.--] Kill failed: ${err.message}`]);
+      }
+      return;
+    }
+    if (!projectPath.trim()) {
+      setConsoleLines((prev) => [...prev, "[ERROR] Workspace path is required"]);
       return;
     }
     setStatus("INITIALIZING");
     setConsoleLines((prev) => [
       ...prev,
-      "[00:01.00] INITIALIZING SANDBOX...",
-      "[00:01.10] UI SIMULATION — NO DOCKER CALL",
+      "[00:01.00] Creating protected session via Ledger runtime...",
     ]);
+    try {
+      const response = await fetch(`${API}/api/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ workspace: projectPath.trim(), image }),
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error || `HTTP ${response.status}`);
+      }
+      setSessionMeta(payload.session);
+      setStatus("ACTIVE");
+      setConsoleLines((prev) => [
+        ...prev,
+        `[00:01.40] SESSION ${payload.session.sessionId}`,
+        `[00:01.55] CONTAINER ${String(payload.session.containerId || "").slice(0, 12)}`,
+        "[00:02.00] SANDBOX ACTIVE",
+      ]);
+    } catch (err) {
+      setStatus("IDLE");
+      setConsoleLines((prev) => [
+        ...prev,
+        `[ERROR] ${err.message}`,
+        "[HINT] Start the runtime with `ledger protect .` or `npm start` in backend.",
+      ]);
+    }
   }
 
   function togglePolicy(key) {
@@ -58,7 +80,7 @@ export default function SandboxSetup() {
     status === "INITIALIZING"
       ? "INITIALIZING..."
       : status === "ACTIVE"
-        ? "STOP SANDBOX [UI]"
+        ? "STOP SANDBOX"
         : "START SANDBOX";
 
   return (
@@ -72,7 +94,7 @@ export default function SandboxSetup() {
                   NEW SANDBOX SESSION
                 </span>
                 <span className="px-space-xs py-0.5 bg-primary-container text-on-primary-fixed font-label-sm text-label-sm font-bold uppercase">
-                  UI // SIM
+                  LOCAL RUNTIME
                 </span>
                 <span
                   className={`px-space-xs py-0.5 border font-label-sm text-label-sm uppercase font-bold ${
@@ -87,13 +109,13 @@ export default function SandboxSetup() {
                 </span>
               </div>
               <p className="font-label-md text-label-md text-on-surface-variant uppercase mt-space-xs tracking-wider">
-                Configure workspace — launch is a frontend simulation only
+                Configure workspace — starts a real protected sandbox through the Ledger runtime
               </p>
             </div>
             <div className="flex items-center gap-space-md font-code-dense text-code-dense text-on-surface-variant">
-              <span>ENGINE: MOCK UI</span>
+              <span>ENGINE: LEDGER RUNTIME</span>
               <span className="hidden lg:block text-outline">|</span>
-              <span className="hidden lg:block">NO DOCKER CONNECTION</span>
+              <span className="hidden lg:block">CLI: ledger protect .</span>
             </div>
           </div>
 
@@ -104,7 +126,7 @@ export default function SandboxSetup() {
                   <span className="font-label-sm text-label-sm text-primary-container font-bold tracking-wider">
                     01 // TARGET PROJECT DIRECTORY
                   </span>
-                  <span className="font-code-dense text-code-dense text-on-surface-variant">[UI INPUT]</span>
+                  <span className="font-code-dense text-code-dense text-on-surface-variant">WORKSPACE</span>
                 </div>
                 <label className="font-label-md text-label-md text-on-surface uppercase mb-space-xs font-semibold" htmlFor="project-path">
                   TARGET PROJECT
@@ -121,9 +143,9 @@ export default function SandboxSetup() {
                   <button
                     className="absolute right-1 px-space-md py-1 bg-surface-container-highest text-primary hover:bg-surface-bright font-label-sm text-label-sm uppercase"
                     type="button"
-                    onClick={() => setProjectPath("/workspace/demo-project")}
+                    onClick={() => setProjectPath("")}
                   >
-                    BROWSE [MOCK]
+                    CLEAR
                   </button>
                 </div>
               </div>
@@ -167,7 +189,9 @@ export default function SandboxSetup() {
                   <span className="font-label-sm text-label-sm text-primary-container font-bold tracking-wider">
                     03 // SESSION IDENTIFIER
                   </span>
-                  <span className="font-code-dense text-code-dense text-primary font-bold">AG-2026-002</span>
+                  <span className="font-code-dense text-code-dense text-primary font-bold">
+                    {session?.sessionId || "UNASSIGNED"}
+                  </span>
                 </div>
                 <label className="font-label-md text-label-md text-on-surface uppercase mb-space-xs block font-semibold" htmlFor="session-name">
                   SESSION NAME
@@ -214,7 +238,7 @@ export default function SandboxSetup() {
                   <div className="border border-surface-container-highest bg-surface-container-low p-space-md">
                     <LoadingState label="INITIALIZING SANDBOX..." />
                     <p className="font-code-dense text-code-dense text-outline mt-space-sm uppercase">
-                      UI simulation — Docker is not started
+                      Calling local runtime POST /api/sessions
                     </p>
                   </div>
                 )}
@@ -225,14 +249,16 @@ export default function SandboxSetup() {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-space-sm font-code-dense text-code-dense">
                       <div>
                         <span className="text-outline uppercase block">CONTAINER</span>
-                        <span className="text-primary font-bold">agentguard-sandbox-01</span>
+                        <span className="text-primary font-bold">
+                          {sessionMeta?.containerId ? String(sessionMeta.containerId).slice(0, 12) : "pending"}
+                        </span>
                       </div>
                       <div>
                         <span className="text-outline uppercase block">WATCHER</span>
                         <span className="text-primary-container font-bold">READY</span>
                       </div>
                     </div>
-                    <span className="font-label-sm text-label-sm text-outline uppercase">[ UI SIMULATION ]</span>
+                    <span className="font-label-sm text-label-sm text-outline uppercase">LIVE RUNTIME</span>
                   </div>
                 )}
 
@@ -250,7 +276,7 @@ export default function SandboxSetup() {
                     LOCAL EXECUTION &amp; TELEMETRY PROTOCOL
                   </span>
                   <p className="font-body-sm text-body-sm text-on-surface-variant leading-relaxed">
-                    Designed for local monitoring with no external telemetry. This screen simulates sandbox lifecycle in the UI only.
+                    Designed for local monitoring with no external telemetry. Starting a sandbox from this page calls the same local runtime used by `ledger protect`.
                   </p>
                 </div>
               </div>
@@ -263,10 +289,10 @@ export default function SandboxSetup() {
                 </span>
                 <div className="flex flex-col divide-y divide-surface-container-highest font-code-dense text-code-dense">
                   {[
-                    ["ENGINE", "UI Mock Provisioner"],
+                    ["ENGINE", "Ledger runtime"],
                     ["IMAGE", image],
-                    ["PATH", projectPath],
-                    ["SESSION", sessionName],
+                    ["PATH", projectPath || "(not set)"],
+                    ["SESSION", sessionMeta?.sessionId || sessionName],
                   ].map(([k, v]) => (
                     <div key={k} className="py-space-sm flex items-center justify-between gap-space-sm">
                       <span className="text-on-surface-variant uppercase shrink-0">{k}</span>
